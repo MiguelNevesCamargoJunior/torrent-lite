@@ -14,6 +14,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Run the MCP stdio server for an already-running local service.
+    #[cfg(feature = "mcp")]
+    Mcp {
+        #[arg(long)]
+        state: std::path::PathBuf,
+        #[arg(long)]
+        read_only: bool,
+    },
     /// Add a magnet or .torrent to the running local service.
     #[cfg(feature = "api-client")]
     Add {
@@ -110,6 +118,8 @@ fn main() -> ExitCode {
         }
     };
     let output = match command {
+        #[cfg(feature = "mcp")]
+        Commands::Mcp { state, read_only } => return run_mcp(state, read_only),
         #[cfg(feature = "api-client")]
         Commands::Add {
             source,
@@ -198,6 +208,24 @@ fn main() -> ExitCode {
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
         Err(_) => {
             eprintln!("error: unable to write output");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(feature = "mcp")]
+fn run_mcp(state: std::path::PathBuf, read_only: bool) -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => return ExitCode::FAILURE,
+    };
+    match runtime.block_on(torrent_lite::mcp::McpServer::new(state, read_only).run()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(_) => {
+            eprintln!("error: MCP stdio transport failed");
             ExitCode::FAILURE
         }
     }

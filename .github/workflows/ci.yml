@@ -36,6 +36,8 @@ jobs:
         run: cargo +1.91.1 clippy --locked --all-targets --features local-api -- -D warnings
       - name: Local client lints
         run: cargo +1.91.1 clippy --locked --all-targets --features api-client -- -D warnings
+      - name: MCP lints
+        run: cargo +1.91.1 clippy --locked --all-targets --features mcp -- -D warnings
       - name: Tests
         run: cargo +1.91.1 test --locked
       - name: Durable state tests
@@ -56,4 +58,6 @@ jobs:
         run: cargo +1.91.1 test --locked --features local-api --test service_discovery
       - name: Shared service client
         run: cargo +1.91.1 test --locked --features api-client --test api_client
+      - name: MCP stdio protocol
+        run: cargo +1.91.1 test --locked --features mcp --test mcp
 

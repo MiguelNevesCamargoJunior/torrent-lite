@@ -7,6 +7,8 @@ pub mod engine_storage;
 #[cfg(feature = "local-api")]
 pub mod local_api;
 pub mod magnet;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod network_input;
 pub mod network_policy;
 pub mod path_policy;
