@@ -75,6 +75,16 @@ async fn removal_requires_authorization_and_preserves_downloaded_files() {
         .starts_with("HTTP/1.1 403")
     );
     assert_eq!(service.list().unwrap().len(), 1);
+    let pause_path = format!("/api/v1/torrents/{}/pause", item.id);
+    assert!(
+        request_target(addr, "POST", &pause_path, &format!("{host}{secret}"))
+            .await
+            .starts_with("HTTP/1.1 204")
+    );
+    assert_eq!(
+        service.list().unwrap()[0].desired,
+        torrent_lite::state_store::DesiredState::Paused
+    );
     assert!(
         request_target(addr, "POST", &path, &format!("{host}{secret}"))
             .await

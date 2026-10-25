@@ -65,6 +65,8 @@ impl LocalApi {
         let router = Router::new()
             .route("/api/v1/torrents", get(list))
             .route("/api/v1/torrents/{id}/remove", post(remove))
+            .route("/api/v1/torrents/{id}/pause", post(pause))
+            .route("/api/v1/torrents/{id}/resume", post(resume))
             .with_state(state);
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
@@ -156,6 +158,16 @@ async fn remove(
     headers: HeaderMap,
 ) -> Result<StatusCode, StatusCode> {
     authorize(&headers, &state)?;
+    require_id(&state, &id)?;
+    state
+        .service
+        .remove(&id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn require_id(state: &ApiState, id: &str) -> Result<(), StatusCode> {
     if id.len() != 36
         || !id
             .bytes()
@@ -172,9 +184,34 @@ async fn remove(
     if !exists {
         return Err(StatusCode::NOT_FOUND);
     }
+    Ok(())
+}
+
+async fn pause(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    authorize(&headers, &state)?;
+    require_id(&state, &id)?;
     state
         .service
-        .remove(&id)
+        .pause(&id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn resume(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    authorize(&headers, &state)?;
+    require_id(&state, &id)?;
+    state
+        .service
+        .resume(&id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
