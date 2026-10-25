@@ -99,6 +99,10 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
         std::fs::read(download.join(&item.id).join("sample.bin")).unwrap(),
         content
     );
+    let (completed, total, finished) = service.progress(&item.id).await.unwrap();
+    assert_eq!(completed, content.len() as u64);
+    assert_eq!(total, content.len() as u64);
+    assert!(finished);
     assert!(service.proxy_connections() > 0);
     service.pause(&item.id).await.unwrap();
     assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);

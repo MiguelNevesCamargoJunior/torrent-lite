@@ -98,6 +98,12 @@ impl ServiceCore {
         self.proxy.successful_connections()
     }
 
+    pub async fn progress(&self, id: &str) -> Option<(u64, u64, bool)> {
+        let handle = self.handles.lock().await.get(id).cloned()?;
+        let stats = handle.stats();
+        Some((stats.progress_bytes, stats.total_bytes, stats.finished))
+    }
+
     pub async fn add_torrent(&self, bytes: &[u8], paused: bool) -> anyhow::Result<StoredTorrent> {
         let _guard = self.mutation.lock().await;
         let sanitized = sanitize_torrent_with_policy(bytes, self.policy)?;

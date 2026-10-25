@@ -165,7 +165,19 @@ fn download_torrent(
     let result = runtime.block_on(async {
         let service = ServiceCore::open(&state, &output, DestinationPolicy::PublicOnly).await?;
         let item = service.add_torrent(&bytes, false).await?;
-        let result = service.wait_completed(&item.id).await;
+        let completion = service.wait_completed(&item.id);
+        tokio::pin!(completion);
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        let result = loop {
+            tokio::select! {
+                result = &mut completion => break result,
+                _ = interval.tick() => {
+                    if let Some((done, total, _)) = service.progress(&item.id).await {
+                        eprintln!("Progress: {done}/{total} bytes");
+                    }
+                }
+            }
+        };
         service.stop().await;
         result.map(|()| item.info_hash)
     });
