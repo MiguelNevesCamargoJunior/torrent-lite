@@ -10,7 +10,7 @@ use crate::{
 };
 use librqbit::{
     AddTorrent, AddTorrentOptions, ConnectionOptions, ListenerOptions, ManagedTorrent, Session,
-    SessionOptions, storage::StorageFactoryExt,
+    SessionOptions, api::TorrentIdOrHash, storage::StorageFactoryExt,
 };
 use std::{
     collections::HashMap,
@@ -147,6 +147,22 @@ impl ServiceCore {
             .set_intent(id, DesiredState::Paused)?;
         if let Some(handle) = self.handles.lock().await.get(id).cloned() {
             self.session.pause(&handle).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn remove(&self, id: &str) -> anyhow::Result<()> {
+        let _guard = self.mutation.lock().await;
+        self.state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .remove(id)?;
+        if let Some(handle) = self.handles.lock().await.remove(id) {
+            // Only resolved .torrent handles enter this map. librqbit 9.0.1's
+            // delete path panics if metadata has not been resolved.
+            self.session
+                .delete(TorrentIdOrHash::Id(handle.id()), false)
+                .await?;
         }
         Ok(())
     }

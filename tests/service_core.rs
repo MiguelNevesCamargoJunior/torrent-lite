@@ -106,12 +106,18 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     assert!(service.proxy_connections() > 0);
     service.pause(&item.id).await.unwrap();
     assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);
+    service.remove(&item.id).await.unwrap();
+    assert!(service.list().unwrap().is_empty());
+    assert_eq!(
+        std::fs::read(download.join(&item.id).join("sample.bin")).unwrap(),
+        content
+    );
     service.stop().await;
     drop(service);
     let service = ServiceCore::open(&database, &download, DestinationPolicy::AllowLan)
         .await
         .unwrap();
-    assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);
+    assert!(service.list().unwrap().is_empty());
     service.stop().await;
     tracker_task.abort();
     seeder.stop().await;
