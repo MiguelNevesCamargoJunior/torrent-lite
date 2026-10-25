@@ -79,9 +79,6 @@ pub fn sanitize_torrent_with_policy(
     policy: DestinationPolicy,
 ) -> Result<SanitizedTorrent, InputError> {
     let before = inspect_torrent(input)?;
-    if before.private {
-        return Err(InputError::UnsupportedFormat);
-    }
     let parsed = torrent_from_bytes(input).map_err(|_| InputError::InvalidTorrent)?;
     let mut safe = Vec::new();
     let mut dropped_trackers = 0;
@@ -97,6 +94,9 @@ pub fn sanitize_torrent_with_policy(
             Ok(url) => safe.push(url.to_string()),
             Err(_) => dropped_trackers += 1,
         }
+    }
+    if before.private && safe.len() != 1 {
+        return Err(InputError::UnsupportedFormat);
     }
     let safe_refs: Vec<Vec<&str>> = safe.iter().map(|url| vec![url.as_str()]).collect();
     let mut bytes = Vec::with_capacity(input.len());

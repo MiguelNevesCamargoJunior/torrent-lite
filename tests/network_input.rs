@@ -69,9 +69,28 @@ fn torrent_rewrite_preserves_infohash_and_removes_udp_tracker() {
 }
 
 #[test]
-fn private_torrent_fails_closed_before_engine_receives_it() {
+fn private_torrent_keeps_its_identity_with_one_safe_tracker() {
     let input = metainfo(&["https://tracker.example.org/announce"], true);
-    assert_eq!(sanitize_torrent(&input), Err(InputError::UnsupportedFormat));
+    let original = inspect_torrent(&input).unwrap();
+    let sanitized = sanitize_torrent(&input).unwrap();
+    let output = inspect_torrent(&sanitized.bytes).unwrap();
+    assert!(output.private);
+    assert_eq!(output.info_hash, original.info_hash);
+    assert_eq!(sanitized.dropped_trackers, 0);
+    assert_eq!(
+        sanitize_torrent(&metainfo(&[], true)),
+        Err(InputError::UnsupportedFormat)
+    );
+    assert_eq!(
+        sanitize_torrent(&metainfo(
+            &[
+                "https://one.example.org/announce",
+                "https://two.example.org/announce"
+            ],
+            true
+        )),
+        Err(InputError::UnsupportedFormat)
+    );
 }
 
 #[test]

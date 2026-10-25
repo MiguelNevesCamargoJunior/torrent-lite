@@ -1,4 +1,6 @@
-use librqbit::{CreateTorrentOptions, ListenerOptions, Session, SessionOptions};
+use librqbit::{
+    AddTorrent, AddTorrentOptions, CreateTorrentOptions, ListenerOptions, Session, SessionOptions,
+};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     time::{Duration, Instant},
@@ -610,7 +612,7 @@ async fn completed_download_releases_queue_slot_and_seeding_is_bounded() {
 }
 
 #[tokio::test]
-async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
+async fn private_torrent_survives_reopen_and_repairs_verified_data() {
     let workspace = tempfile::tempdir().unwrap();
     let source = workspace.path().join("source");
     let download = workspace.path().join("download");
@@ -668,11 +670,38 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     });
     let raw = torrent.as_bytes().unwrap();
     let parsed = librqbit_core::torrent_metainfo::torrent_from_bytes(&raw).unwrap();
+    let mut private_info = parsed.info.raw_bytes.to_vec();
+    assert_eq!(private_info.pop(), Some(b'e'));
+    private_info.extend(b"7:privatei1ee");
     let mut bytes = b"d8:announce".to_vec();
     bytes.extend(format!("{}:{tracker_url}", tracker_url.len()).as_bytes());
     bytes.extend(b"4:info");
-    bytes.extend(parsed.info.raw_bytes.as_ref());
+    bytes.extend(&private_info);
     bytes.push(b'e');
+    assert!(
+        torrent_lite::torrent_file::inspect_torrent(&bytes)
+            .unwrap()
+            .private
+    );
+    let private_seeder = seeder
+        .add_torrent(
+            AddTorrent::from_bytes(bytes.clone()),
+            Some(AddTorrentOptions {
+                overwrite: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .into_handle()
+        .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        private_seeder.wait_until_completed(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let database = workspace.path().join("state.db");
 
     let service = ServiceCore::open(&database, &download, DestinationPolicy::AllowLan)
