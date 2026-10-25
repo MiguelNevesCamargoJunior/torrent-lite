@@ -2,6 +2,7 @@
 
 use crate::api_client::LocalClient;
 use crate::local_api::AddView;
+use crate::local_api::FilesView;
 use axum::{
     Json, Router,
     body::to_bytes,
@@ -38,6 +39,12 @@ struct MagnetRequest {
     magnet: String,
     #[serde(default)]
     paused: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileSelectionRequest {
+    only_files: Option<Vec<usize>>,
 }
 
 #[derive(Clone)]
@@ -87,6 +94,7 @@ impl BrowserUi {
             .route("/{key}/add-magnet", post(add_magnet))
             .route("/{key}/add-torrent", post(add_torrent))
             .route("/{key}/torrents/{id}/{action}", post(mutate_torrent))
+            .route("/{key}/torrents/{id}/files", get(files).post(select_files))
             .with_state(state);
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
@@ -252,6 +260,39 @@ async fn add_torrent(
         .await
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
     Ok((StatusCode::CREATED, response_headers(), Json(item)))
+}
+
+async fn files(
+    State(state): State<UiState>,
+    RoutePath((key, id)): RoutePath<(String, String)>,
+    headers: HeaderMap,
+) -> Result<(HeaderMap, Json<FilesView>), StatusCode> {
+    check(&headers, &key, &state)?;
+    let view = state
+        .client
+        .files(&id)
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    Ok((response_headers(), Json(view)))
+}
+
+async fn select_files(
+    State(state): State<UiState>,
+    RoutePath((key, id)): RoutePath<(String, String)>,
+    request: Request,
+) -> Result<(HeaderMap, StatusCode), StatusCode> {
+    check_mutation(request.headers(), &key, &state, "application/json")?;
+    let bytes = to_bytes(request.into_body(), 60_000)
+        .await
+        .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
+    let body: FileSelectionRequest =
+        serde_json::from_slice(&bytes).map_err(|_| StatusCode::BAD_REQUEST)?;
+    state
+        .client
+        .select_files(&id, body.only_files)
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    Ok((response_headers(), StatusCode::NO_CONTENT))
 }
 
 async fn mutate_torrent(

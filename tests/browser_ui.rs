@@ -30,6 +30,75 @@ async fn get(addr: std::net::SocketAddr, path: &str, host: &str) -> String {
 }
 
 #[tokio::test]
+async fn dashboard_file_selection_uses_csrf_and_updates_paused_torrent() {
+    let workspace = tempfile::tempdir().unwrap();
+    let output = workspace.path().join("download");
+    std::fs::create_dir(&output).unwrap();
+    let database = workspace.path().join("state.db");
+    let service = Arc::new(
+        ServiceCore::open(&database, &output, DestinationPolicy::AllowLan)
+            .await
+            .unwrap(),
+    );
+    let api = LocalApi::bind(service.clone()).await.unwrap();
+    let _lease = EndpointLease::publish(&database, &api).unwrap();
+    let ui = BrowserUi::bind(&database).await.unwrap();
+    let mut metainfo = b"d4:infod5:filesld6:lengthi4e4:pathl5:a.bineed6:lengthi4e4:pathl5:b.bineee4:name4:test12:piece lengthi4e6:pieces40:".to_vec();
+    metainfo.extend([0_u8; 40]);
+    metainfo.extend(b"ee");
+    let item = service.add_torrent(&metainfo, true).await.unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let base = format!("http://{}{}", ui.local_addr(), ui.page_path());
+    let path = format!("{base}torrents/{}/files", item.id);
+    let initial: serde_json::Value = client
+        .get(&path)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(initial["summary"]["files"].as_array().unwrap().len(), 2);
+    assert!(initial["only_files"].is_null());
+    let no_csrf = client
+        .post(&path)
+        .json(&serde_json::json!({"only_files":[1]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(no_csrf.status(), reqwest::StatusCode::FORBIDDEN);
+    let token: serde_json::Value = client
+        .get(format!("{base}csrf"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let selected = client
+        .post(&path)
+        .header("origin", format!("http://{}", ui.local_addr()))
+        .header("x-csrf-token", token["token"].as_str().unwrap())
+        .json(&serde_json::json!({"only_files":[1]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(selected.status(), reqwest::StatusCode::NO_CONTENT);
+    let updated: serde_json::Value = client
+        .get(&path)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(updated["only_files"], serde_json::json!([1]));
+    drop(ui);
+    drop(api);
+    service.stop().await;
+}
+
+#[tokio::test]
 async fn local_dashboard_requires_ephemeral_path_and_restricts_browser() {
     let workspace = tempfile::tempdir().unwrap();
     let output = workspace.path().join("download");

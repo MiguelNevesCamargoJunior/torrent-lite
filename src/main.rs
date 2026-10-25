@@ -414,7 +414,7 @@ fn run_client(action: ClientAction, state: std::path::PathBuf) -> ExitCode {
                 }
             }
             ClientAction::SelectFiles(id, indices, all) => {
-                anyhow::ensure!(all != !indices.is_empty(), "provide indices or --all");
+                anyhow::ensure!(all == indices.is_empty(), "provide indices or --all");
                 client
                     .select_files(&id, if all { None } else { Some(indices) })
                     .await?;
