@@ -43,7 +43,7 @@ required-features = ["state-store"]
 
 [target.'cfg(windows)'.dependencies]
 winx = "=0.36.4"
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile = "3"
@@ -70,6 +70,10 @@ required-features = ["service-core"]
 
 [[test]]
 name = "local_api"
+required-features = ["local-api"]
+
+[[test]]
+name = "service_discovery"
 required-features = ["local-api"]
 
 [profile.release]

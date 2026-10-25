@@ -50,4 +50,6 @@ jobs:
         run: cargo +1.91.1 test --locked --features service-core --test service_core
       - name: Local API authentication
         run: cargo +1.91.1 test --locked --features local-api --test local_api
+      - name: Service discovery secret protection
+        run: cargo +1.91.1 test --locked --features local-api --test service_discovery
 
