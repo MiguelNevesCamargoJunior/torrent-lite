@@ -118,7 +118,7 @@ async fn engine_peer_uses_authenticated_proxy_with_persisted_storage() {
 }
 
 #[tokio::test]
-async fn http_tracker_and_peer_both_use_the_proxy() {
+async fn redirected_http_tracker_and_peer_both_use_the_proxy() {
     let workspace = tempfile::tempdir().unwrap();
     let source = workspace.path().join("source");
     let destination = workspace.path().join("destination");
@@ -143,17 +143,23 @@ async fn http_tracker_and_peer_both_use_the_proxy() {
     let peer = seeder.listen_addr().unwrap();
 
     let tracker = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
-    let tracker_url = format!("http://{}/announce", tracker.local_addr().unwrap());
+    let tracker_origin = format!("http://{}", tracker.local_addr().unwrap());
+    let tracker_url = format!("{tracker_origin}/redirect");
     let requests = Arc::new(AtomicUsize::new(0));
     let request_count = requests.clone();
     let tracker_task = tokio::spawn(async move {
         loop {
             let (mut stream, _) = tracker.accept().await.unwrap();
             let mut request = [0_u8; 8192];
-            if stream.read(&mut request).await.is_err() {
+            let size = stream.read(&mut request).await.unwrap();
+            request_count.fetch_add(1, Ordering::Relaxed);
+            if request[..size].starts_with(b"GET /redirect") {
+                let response = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: {tracker_origin}/announce\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
                 continue;
             }
-            request_count.fetch_add(1, Ordering::Relaxed);
             let mut body = b"d8:intervali30e5:peers6:".to_vec();
             body.extend(Ipv4Addr::LOCALHOST.octets());
             body.extend(peer.port().to_be_bytes());
@@ -221,8 +227,8 @@ async fn http_tracker_and_peer_both_use_the_proxy() {
         std::fs::read(destination.join("synthetic.bin")).unwrap(),
         content
     );
-    assert!(requests.load(Ordering::Relaxed) > 0);
-    assert!(proxy.successful_connections() >= 2);
+    assert!(requests.load(Ordering::Relaxed) >= 2);
+    assert!(proxy.successful_connections() >= 3);
     leecher.stop().await;
     seeder.stop().await;
     tracker_task.abort();

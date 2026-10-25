@@ -14,6 +14,8 @@ Before public trackers are enabled, sanitize the magnet and metainfo supplied to
 
 Next qualification: a synthetic local HTTP tracker returns a loopback seeder. The leecher gets no initial peer list. The test succeeds only if the tracker announces and the peer data connection both traverse the authenticated proxy, while the persisted storage adapter receives the bytes. The LAN mode is explicit for this test; the default public policy still denies its loopback endpoints.
 
+Extend that fixture with an HTTP redirect from `/redirect` to `/announce`, closing the first connection. Require two tracker requests and at least three successful proxy connections (redirect, announce, peer). The destination policy still applies to each new socket. A public-to-private redirect remains denied by the proxy's public policy; a separate controlled public endpoint is needed for an end-to-end version of that negative test.
+
 Source of address classes: IANA IPv4 and IPv6 Special-Purpose Address Registries, consulted 2026-10-25. Update the policy when those registries change.
 
 - https://www.iana.org/assignments/iana-ipv4-special-registry/
