@@ -13,6 +13,7 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 - [x] Bounded persistent download queue and optional global bandwidth caps at service startup, subject to CI qualification.
 - [x] Persisted file selection across CLI, API, MCP and browser controls, qualified with multifile local transfers.
 - [x] Optional bounded seeding slots with a configured peer capacity ceiling, qualified with local transfers and restart recheck.
+- [x] Private v1 `.torrent` support with one policy-filtered HTTP(S) tracker, tested with a local transfer and restart recheck.
 - [x] Forced process stop after paused addition and removal retains intent and tombstones on restart.
 
 ## Required before a stable release
@@ -22,7 +23,7 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 - [ ] Qualify background resolution of uncached magnet metadata without holding the service mutation lock during the network wait, including cancellation, retries and the active-slot bound on all supported systems.
 - [ ] Finish browser UI qualification: automated keyboard/browser tests, usability review and CSRF regression coverage across supported browsers.
 - [ ] Show measured speed, peers, error states and ETA without inventing values; provide machine-readable API errors.
-- [ ] Qualify DHT, UDP trackers, private torrents and peer discovery under the outbound network policy, or document narrower compatibility.
+- [ ] Qualify DHT, UDP trackers, private tracker failover and peer discovery under the outbound network policy, or document narrower compatibility.
 - [ ] Test low disk space, locked files, service crash during each mutation, migration interruption and concurrent clients on native Windows.
 - [ ] Fuzz untrusted inputs and obtain an independent security review.
 - [ ] Publish reproducible benchmark procedure and measurements of memory, CPU and throughput on Windows, Linux and macOS.

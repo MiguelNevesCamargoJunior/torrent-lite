@@ -670,7 +670,7 @@ async fn private_torrent_survives_reopen_and_repairs_verified_data() {
     });
     let raw = torrent.as_bytes().unwrap();
     let parsed = librqbit_core::torrent_metainfo::torrent_from_bytes(&raw).unwrap();
-    let mut private_info = parsed.info.raw_bytes.to_vec();
+    let mut private_info = parsed.info.raw_bytes.0.to_vec();
     assert_eq!(private_info.pop(), Some(b'e'));
     private_info.extend(b"7:privatei1ee");
     let mut bytes = b"d8:announce".to_vec();

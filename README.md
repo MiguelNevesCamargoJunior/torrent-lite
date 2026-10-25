@@ -52,7 +52,7 @@ For a v1 magnet containing an HTTP(S) tracker:
 cargo run --locked --features service-core -- download-magnet "magnet:?xt=urn:btih:HASH&tr=https%3A%2F%2Ftracker.example%2Fannounce" --output path/to/downloads --state path/to/state.db
 ```
 
-Files for each torrent are placed under a directory named by the service ID inside the output root. Only HTTP(S) trackers and proxied TCP peers are supported at this stage; DHT, UDP trackers and local discovery are disabled.
+Files for each torrent are placed under a directory named by the service ID inside the output root. Only HTTP(S) trackers and proxied TCP peers are supported at this stage; DHT, UDP trackers and local discovery are disabled. Private v1 `.torrent` files require exactly one permitted HTTP(S) tracker. Private torrents with no permitted tracker or multiple permitted trackers are rejected until tracker failover and isolation are qualified; see the [private torrent contract](docs/private-torrent-spec.md).
 
 The experimental foreground service can also be started separately with:
 
