@@ -84,6 +84,7 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     assert_eq!(item.desired, DesiredState::Paused);
     assert_eq!(service.list().unwrap().len(), 1);
     service.stop().await;
+    drop(service);
 
     let service = ServiceCore::open(&database, &download, DestinationPolicy::AllowLan)
         .await
@@ -102,6 +103,7 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     service.pause(&item.id).await.unwrap();
     assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);
     service.stop().await;
+    drop(service);
     let service = ServiceCore::open(&database, &download, DestinationPolicy::AllowLan)
         .await
         .unwrap();
