@@ -228,6 +228,8 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "serde_core",
+ "serde_json",
+ "serde_path_to_error",
  "sync_wrapper",
  "tokio",
  "tower",
@@ -3277,6 +3279,7 @@ name = "torrent-lite"
 version = "0.1.0-dev"
 dependencies = [
  "anyhow",
+ "axum",
  "cap-fs-ext",
  "cap-std",
  "clap",

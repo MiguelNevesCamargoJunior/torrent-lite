@@ -32,6 +32,8 @@ jobs:
         run: cargo +1.91.1 clippy --locked --all-targets --features secure-engine-qualification -- -D warnings
       - name: Service core lints
         run: cargo +1.91.1 clippy --locked --all-targets --features service-core -- -D warnings
+      - name: Local API lints
+        run: cargo +1.91.1 clippy --locked --all-targets --features local-api -- -D warnings
       - name: Tests
         run: cargo +1.91.1 test --locked
       - name: Durable state tests
@@ -46,4 +48,6 @@ jobs:
         run: cargo +1.91.1 test --locked --features secure-engine-qualification --test engine_proxy
       - name: Service core recovery
         run: cargo +1.91.1 test --locked --features service-core --test service_core
+      - name: Local API authentication
+        run: cargo +1.91.1 test --locked --features local-api --test local_api
 

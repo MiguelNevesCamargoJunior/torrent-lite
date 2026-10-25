@@ -2,6 +2,8 @@
 
 #[cfg(feature = "durable-engine")]
 pub mod engine_storage;
+#[cfg(feature = "local-api")]
+pub mod local_api;
 pub mod magnet;
 pub mod network_input;
 pub mod network_policy;
