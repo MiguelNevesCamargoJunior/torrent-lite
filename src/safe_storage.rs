@@ -1,7 +1,9 @@
 //! Open torrent files relative to an already opened directory handle.
 
 use crate::path_policy::validate_components;
-use cap_fs_ext::{FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
+#[cfg(unix)]
+use cap_fs_ext::MetadataExt;
+use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::{
     ambient_authority,
     fs::{Dir, File, OpenOptions},
@@ -20,17 +22,43 @@ pub struct FileIdentity {
 
 impl FileIdentity {
     pub fn from_file(file: &File) -> io::Result<Self> {
-        let metadata = file.metadata()?;
-        if !metadata.is_file() || metadata.nlink() != 1 || metadata.ino() == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "unsupported file identity",
-            ));
+        #[cfg(unix)]
+        {
+            let metadata = file.metadata()?;
+            if !metadata.is_file() || metadata.nlink() != 1 || metadata.ino() == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "unsupported file identity",
+                ));
+            }
+            Ok(Self {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+            })
         }
-        Ok(Self {
-            device: metadata.dev(),
-            inode: metadata.ino(),
-        })
+        #[cfg(windows)]
+        {
+            let metadata = file.metadata()?;
+            let information = winx::winapi_util::file::information(file.try_clone()?.into_std())?;
+            let device = information.volume_serial_number();
+            let inode = information.file_index();
+            let links = information.number_of_links();
+            if !metadata.is_file() || links != 1 || inode == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "unsupported file identity",
+                ));
+            }
+            Ok(Self { device, inode })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = file;
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "file identity is unsupported on this platform",
+            ))
+        }
     }
 }
 
