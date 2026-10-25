@@ -14,6 +14,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Add a magnet or .torrent to the running local service.
+    #[cfg(feature = "api-client")]
+    Add {
+        source: String,
+        #[arg(long)]
+        state: std::path::PathBuf,
+        #[arg(long)]
+        paused: bool,
+    },
     /// List torrents through the running local service.
     #[cfg(feature = "api-client")]
     List {
@@ -101,6 +110,12 @@ fn main() -> ExitCode {
         }
     };
     let output = match command {
+        #[cfg(feature = "api-client")]
+        Commands::Add {
+            source,
+            state,
+            paused,
+        } => return run_client(ClientAction::Add(source, paused), state),
         #[cfg(feature = "api-client")]
         Commands::List { state, json } => return run_client(ClientAction::List(json), state),
         #[cfg(feature = "api-client")]
@@ -190,6 +205,7 @@ fn main() -> ExitCode {
 
 #[cfg(feature = "api-client")]
 enum ClientAction {
+    Add(String, bool),
     List(bool),
     Pause(String),
     Resume(String),
@@ -212,6 +228,18 @@ fn run_client(action: ClientAction, state: std::path::PathBuf) -> ExitCode {
     let result: anyhow::Result<String> = runtime.block_on(async {
         let client = LocalClient::discover(&state)?;
         match action {
+            ClientAction::Add(source, paused) => {
+                let item = if source.starts_with("magnet:?") {
+                    client.add_magnet(&source, paused).await?
+                } else {
+                    let file = File::open(&source)?;
+                    let mut bytes = Vec::new();
+                    file.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+                    anyhow::ensure!(bytes.len() <= 8 * 1024 * 1024, "torrent file exceeds 8 MiB");
+                    client.add_torrent(&bytes, paused).await?
+                };
+                Ok(format!("Added: {} ({})", item.id, item.desired))
+            }
             ClientAction::List(json) => {
                 let rows = client.list().await?;
                 if json {

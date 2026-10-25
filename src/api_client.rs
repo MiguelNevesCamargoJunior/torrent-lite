@@ -1,6 +1,9 @@
 //! Bounded local control client. The endpoint token never enters URLs or logs.
 
-use crate::{local_api::TorrentView, service_discovery::EndpointLease};
+use crate::{
+    local_api::{AddView, TorrentView},
+    service_discovery::EndpointLease,
+};
 use anyhow::{Context, ensure};
 use std::{net::SocketAddr, path::Path, time::Duration};
 
@@ -33,6 +36,32 @@ impl LocalClient {
             .send()
             .await?
             .error_for_status()?;
+        Ok(response.json().await?)
+    }
+
+    pub async fn add_magnet(&self, magnet: &str, paused: bool) -> anyhow::Result<AddView> {
+        self.add(serde_json::json!({"magnet": magnet, "paused": paused}))
+            .await
+    }
+
+    pub async fn add_torrent(&self, bytes: &[u8], paused: bool) -> anyhow::Result<AddView> {
+        ensure!(bytes.len() <= 8 * 1024 * 1024, "torrent file exceeds 8 MiB");
+        self.add(serde_json::json!({"metainfo_base64": data_encoding::BASE64.encode(bytes), "paused": paused})).await
+    }
+
+    async fn add(&self, body: serde_json::Value) -> anyhow::Result<AddView> {
+        let response = self
+            .http
+            .post(format!("http://{}/api/v1/torrents", self.addr))
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
+        ensure!(
+            response.status() == reqwest::StatusCode::CREATED,
+            "unexpected service response"
+        );
         Ok(response.json().await?)
     }
 

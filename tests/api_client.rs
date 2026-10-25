@@ -47,6 +47,18 @@ async fn client_discovers_running_service_and_uses_same_state() {
     client.pause(&item.id).await.unwrap();
     client.remove(&item.id).await.unwrap();
     assert!(client.list().await.unwrap().is_empty());
+    let add = Command::new(env!("CARGO_BIN_EXE_torrent-lite"))
+        .arg("add")
+        .arg("magnet:?xt=urn:btih:0000000000000000000000000000000000000002&tr=https://tracker.example/announce")
+        .arg("--state")
+        .arg(&database)
+        .arg("--paused")
+        .output()
+        .unwrap();
+    assert!(add.status.success());
+    let added = client.list().await.unwrap();
+    assert_eq!(added.len(), 1);
+    assert_eq!(added[0].desired, "paused");
     drop(lease);
     drop(api);
     service.stop().await;

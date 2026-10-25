@@ -123,6 +123,14 @@ impl ServiceCore {
     }
 
     pub async fn add_magnet(&self, magnet: &str) -> anyhow::Result<StoredTorrent> {
+        self.add_magnet_with_pause(magnet, false).await
+    }
+
+    pub async fn add_magnet_with_pause(
+        &self,
+        magnet: &str,
+        paused: bool,
+    ) -> anyhow::Result<StoredTorrent> {
         let _guard = self.mutation.lock().await;
         let sanitized = sanitize_magnet_with_policy(magnet, self.policy)?;
         anyhow::ensure!(
@@ -135,13 +143,15 @@ impl ServiceCore {
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
-            .register(AddInput::Magnet(magnet), &self.root_path, false)?;
-        self.activate_source(
-            &item,
-            AddTorrent::from_url(sanitized.uri),
-            Some(Duration::from_secs(30)),
-        )
-        .await?;
+            .register(AddInput::Magnet(magnet), &self.root_path, paused)?;
+        if item.desired == DesiredState::Running {
+            self.activate_source(
+                &item,
+                AddTorrent::from_url(sanitized.uri),
+                Some(Duration::from_secs(30)),
+            )
+            .await?;
+        }
         Ok(item)
     }
 

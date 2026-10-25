@@ -20,9 +20,20 @@ async fn request_target(
     path: &str,
     headers: &str,
 ) -> String {
+    request_body(addr, method, path, headers, "").await
+}
+
+async fn request_body(
+    addr: std::net::SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &str,
+    body: &str,
+) -> String {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let request = format!(
-        "{method} {path} HTTP/1.1\r\n{headers}Connection: close\r\nContent-Length: 0\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\n{headers}Connection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
     );
     stream.write_all(request.as_bytes()).await.unwrap();
     let mut response = Vec::new();
@@ -31,6 +42,46 @@ async fn request_target(
         .unwrap()
         .unwrap();
     String::from_utf8(response).unwrap()
+}
+
+#[tokio::test]
+async fn add_rejects_unauthorized_body_and_registers_paused_magnet() {
+    let workspace = tempfile::tempdir().unwrap();
+    let output = workspace.path().join("download");
+    std::fs::create_dir(&output).unwrap();
+    let service = Arc::new(
+        ServiceCore::open(
+            &workspace.path().join("state.db"),
+            &output,
+            DestinationPolicy::PublicOnly,
+        )
+        .await
+        .unwrap(),
+    );
+    let api = LocalApi::bind(service.clone()).await.unwrap();
+    let addr = api.local_addr();
+    let host = format!("Host: {addr}\r\nContent-Type: application/json\r\n");
+    let body = r#"{"magnet":"magnet:?xt=urn:btih:0000000000000000000000000000000000000001&tr=https://tracker.example/announce","paused":true}"#;
+    let denied = request_body(addr, "POST", "/api/v1/torrents", &host, body).await;
+    assert!(denied.starts_with("HTTP/1.1 401"));
+    assert!(service.list().unwrap().is_empty());
+    let secret = format!("Authorization: Bearer {}\r\n", api.token());
+    let allowed = request_body(
+        addr,
+        "POST",
+        "/api/v1/torrents",
+        &format!("{host}{secret}"),
+        body,
+    )
+    .await;
+    assert!(allowed.starts_with("HTTP/1.1 201"));
+    assert_eq!(service.list().unwrap().len(), 1);
+    assert_eq!(
+        service.list().unwrap()[0].desired,
+        torrent_lite::state_store::DesiredState::Paused
+    );
+    drop(api);
+    service.stop().await;
 }
 
 #[tokio::test]

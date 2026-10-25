@@ -1,4 +1,5 @@
 /target/
+/work/
 /.superpowers/
 *.log
 .env
