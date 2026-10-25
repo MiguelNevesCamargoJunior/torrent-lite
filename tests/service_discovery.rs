@@ -142,10 +142,14 @@ async fn forced_stop_then_restart_replaces_stale_endpoint() {
     let add_one = post_over_http(
         &before,
         "/api/v1/torrents",
-        r#"{"magnet":"magnet:?xt=urn:btih:0000000000000000000000000000000000000001","paused":true}"#,
+        r#"{"magnet":"magnet:?xt=urn:btih:0000000000000000000000000000000000000001&tr=https://tracker.example/announce","paused":true}"#,
     )
     .await;
-    assert!(add_one.starts_with("HTTP/1.1 201"));
+    assert!(
+        add_one.starts_with("HTTP/1.1 201"),
+        "{}",
+        add_one.lines().next().unwrap_or("")
+    );
     let first_id =
         serde_json::from_str::<serde_json::Value>(add_one.split("\r\n\r\n").nth(1).unwrap())
             .unwrap()["id"]
@@ -155,7 +159,7 @@ async fn forced_stop_then_restart_replaces_stale_endpoint() {
     let add_two = post_over_http(
         &before,
         "/api/v1/torrents",
-        r#"{"magnet":"magnet:?xt=urn:btih:0000000000000000000000000000000000000002","paused":true}"#,
+        r#"{"magnet":"magnet:?xt=urn:btih:0000000000000000000000000000000000000002&tr=https://tracker.example/announce","paused":true}"#,
     )
     .await;
     assert!(add_two.starts_with("HTTP/1.1 201"));
