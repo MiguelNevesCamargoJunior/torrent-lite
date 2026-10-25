@@ -13,7 +13,7 @@ struct InfoVersion {
     meta_version: Option<u8>,
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TorrentSummary {
     pub info_hash: String,
     pub name: String,
@@ -22,7 +22,7 @@ pub struct TorrentSummary {
     pub private: bool,
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TorrentFile {
     pub path: Vec<String>,
     pub bytes: u64,

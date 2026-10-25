@@ -3,6 +3,7 @@
 use crate::{
     service_core::ServiceCore,
     state_store::{DesiredState, SourceKind},
+    torrent_file::TorrentSummary,
 };
 use axum::{
     Json, Router,
@@ -43,6 +44,18 @@ struct AddRequest {
     metainfo_base64: Option<String>,
     #[serde(default)]
     paused: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileSelectionRequest {
+    only_files: Option<Vec<usize>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FilesView {
+    pub summary: TorrentSummary,
+    pub only_files: Option<Vec<usize>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -101,6 +114,7 @@ impl LocalApi {
             .route("/api/v1/torrents/{id}/pause", post(pause))
             .route("/api/v1/torrents/{id}/resume", post(resume))
             .route("/api/v1/torrents/{id}/verify", post(verify))
+            .route("/api/v1/torrents/{id}/files", get(files).put(select_files))
             .fallback(|| async { StatusCode::NOT_FOUND })
             .layer(from_fn(json_errors))
             .with_state(state);
@@ -137,6 +151,7 @@ async fn json_errors(request: Request, next: Next) -> Response {
         StatusCode::UNSUPPORTED_MEDIA_TYPE => "unsupported_media_type",
         StatusCode::UNPROCESSABLE_ENTITY => "unprocessable",
         StatusCode::TOO_MANY_REQUESTS => "busy",
+        StatusCode::CONFLICT => "conflict",
         _ => "internal_error",
     };
     *response.body_mut() = Body::from(format!("{{\"error\":{{\"code\":\"{code}\"}}}}"));
@@ -299,6 +314,53 @@ async fn add(
             .to_owned(),
         }),
     ))
+}
+
+async fn files(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<FilesView>, StatusCode> {
+    authorize(&headers, &state)?;
+    require_id(&state, &id)?;
+    let (summary, only_files) = state.service.files(&id).map_err(|_| StatusCode::CONFLICT)?;
+    Ok(Json(FilesView {
+        summary,
+        only_files,
+    }))
+}
+
+async fn select_files(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    request: Request,
+) -> Result<StatusCode, StatusCode> {
+    authorize(request.headers(), &state)?;
+    require_id(&state, &id)?;
+    let content_type = request
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok());
+    if !content_type
+        .is_some_and(|value| value == "application/json" || value.starts_with("application/json;"))
+    {
+        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+    let bytes = tokio::time::timeout(
+        Duration::from_secs(10),
+        to_bytes(request.into_body(), 60_000),
+    )
+    .await
+    .map_err(|_| StatusCode::REQUEST_TIMEOUT)?
+    .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
+    let input: FileSelectionRequest =
+        serde_json::from_slice(&bytes).map_err(|_| StatusCode::BAD_REQUEST)?;
+    state
+        .service
+        .set_file_selection(&id, input.only_files)
+        .await
+        .map_err(|_| StatusCode::CONFLICT)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn remove(

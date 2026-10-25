@@ -1,7 +1,7 @@
 //! Bounded local control client. The endpoint token never enters URLs or logs.
 
 use crate::{
-    local_api::{AddView, TorrentView},
+    local_api::{AddView, FilesView, TorrentView},
     service_discovery::EndpointLease,
 };
 use anyhow::{Context, ensure};
@@ -37,6 +37,39 @@ impl LocalClient {
             .await?
             .error_for_status()?;
         Ok(response.json().await?)
+    }
+
+    pub async fn files(&self, id: &str) -> anyhow::Result<FilesView> {
+        validate_id(id)?;
+        let response = self
+            .http
+            .get(format!("http://{}/api/v1/torrents/{id}/files", self.addr))
+            .bearer_auth(&self.token)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(response.json().await?)
+    }
+
+    pub async fn select_files(
+        &self,
+        id: &str,
+        only_files: Option<Vec<usize>>,
+    ) -> anyhow::Result<()> {
+        validate_id(id)?;
+        let response = self
+            .http
+            .put(format!("http://{}/api/v1/torrents/{id}/files", self.addr))
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({"only_files": only_files}))
+            .send()
+            .await?;
+        ensure!(
+            response.status() == reqwest::StatusCode::NO_CONTENT,
+            "service rejected file selection with status {}",
+            response.status()
+        );
+        Ok(())
     }
 
     pub async fn add_magnet(&self, magnet: &str, paused: bool) -> anyhow::Result<AddView> {
@@ -92,8 +125,7 @@ impl LocalClient {
         action: &str,
         timeout: Duration,
     ) -> anyhow::Result<()> {
-        let parsed = uuid::Uuid::parse_str(id).context("invalid torrent ID")?;
-        ensure!(parsed.hyphenated().to_string() == id, "invalid torrent ID");
+        validate_id(id)?;
         let response = self
             .http
             .post(format!(
@@ -111,4 +143,10 @@ impl LocalClient {
         );
         Ok(())
     }
+}
+
+fn validate_id(id: &str) -> anyhow::Result<()> {
+    let parsed = uuid::Uuid::parse_str(id).context("invalid torrent ID")?;
+    ensure!(parsed.hyphenated().to_string() == id, "invalid torrent ID");
+    Ok(())
 }

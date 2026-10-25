@@ -45,6 +45,25 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Show indexed files and the persisted selection for a torrent.
+    #[cfg(feature = "api-client")]
+    Files {
+        id: String,
+        #[arg(long)]
+        state: std::path::PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Select file indices while the torrent is paused; --all restores all files.
+    #[cfg(feature = "api-client")]
+    SelectFiles {
+        id: String,
+        indices: Vec<usize>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        state: std::path::PathBuf,
+    },
     /// Pause a torrent in the running service.
     #[cfg(feature = "api-client")]
     Pause {
@@ -152,6 +171,17 @@ fn main() -> ExitCode {
         } => return run_client(ClientAction::Add(source, paused), state),
         #[cfg(feature = "api-client")]
         Commands::List { state, json } => return run_client(ClientAction::List(json), state),
+        #[cfg(feature = "api-client")]
+        Commands::Files { id, state, json } => {
+            return run_client(ClientAction::Files(id, json), state);
+        }
+        #[cfg(feature = "api-client")]
+        Commands::SelectFiles {
+            id,
+            indices,
+            all,
+            state,
+        } => return run_client(ClientAction::SelectFiles(id, indices, all), state),
         #[cfg(feature = "api-client")]
         Commands::Pause { id, state } => return run_client(ClientAction::Pause(id), state),
         #[cfg(feature = "api-client")]
@@ -298,6 +328,8 @@ fn run_mcp(state: std::path::PathBuf, read_only: bool) -> ExitCode {
 enum ClientAction {
     Add(String, bool),
     List(bool),
+    Files(String, bool),
+    SelectFiles(String, Vec<usize>, bool),
     Pause(String),
     Resume(String),
     Remove(String),
@@ -354,6 +386,39 @@ fn run_client(action: ClientAction, state: std::path::PathBuf) -> ExitCode {
                         .collect::<Vec<_>>()
                         .join("\n"))
                 }
+            }
+            ClientAction::Files(id, json) => {
+                let view = client.files(&id).await?;
+                if json {
+                    Ok(serde_json::to_string(&view)?)
+                } else {
+                    Ok(view
+                        .summary
+                        .files
+                        .iter()
+                        .enumerate()
+                        .map(|(index, file)| {
+                            let selected = view
+                                .only_files
+                                .as_ref()
+                                .is_none_or(|items| items.contains(&index));
+                            format!(
+                                "{} {index}  {} bytes  {}",
+                                if selected { "*" } else { " " },
+                                file.bytes,
+                                file.path.join("/")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"))
+                }
+            }
+            ClientAction::SelectFiles(id, indices, all) => {
+                anyhow::ensure!(all != !indices.is_empty(), "provide indices or --all");
+                client
+                    .select_files(&id, if all { None } else { Some(indices) })
+                    .await?;
+                Ok(format!("Updated file selection: {id}"))
             }
             ClientAction::Pause(id) => {
                 client.pause(&id).await?;

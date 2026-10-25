@@ -45,6 +45,65 @@ async fn request_body(
 }
 
 #[tokio::test]
+async fn file_selection_api_requires_auth_and_pause_and_preserves_valid_choice() {
+    let workspace = tempfile::tempdir().unwrap();
+    let output = workspace.path().join("download");
+    std::fs::create_dir(&output).unwrap();
+    let database = workspace.path().join("state.db");
+    let mut metainfo = b"d4:infod5:filesld6:lengthi4e4:pathl5:a.bineed6:lengthi4e4:pathl5:b.bineee4:name4:test12:piece lengthi4e6:pieces40:".to_vec();
+    metainfo.extend([0_u8; 40]);
+    metainfo.extend(b"ee");
+    let service = Arc::new(
+        ServiceCore::open(&database, &output, DestinationPolicy::AllowLan)
+            .await
+            .unwrap(),
+    );
+    let item = service.add_torrent(&metainfo, true).await.unwrap();
+    let api = LocalApi::bind(service.clone()).await.unwrap();
+    let path = format!("/api/v1/torrents/{}/files", item.id);
+    let addr = api.local_addr();
+    let host = format!("Host: {addr}\r\nContent-Type: application/json\r\n");
+    let authorized = format!("{host}Authorization: Bearer {}\r\n", api.token());
+    assert!(
+        request_target(addr, "GET", &path, &host)
+            .await
+            .starts_with("HTTP/1.1 401")
+    );
+    let initial = request_target(addr, "GET", &path, &authorized).await;
+    assert!(initial.contains("\"only_files\":null"));
+    assert!(initial.contains("b.bin"));
+    assert!(
+        request_body(addr, "PUT", &path, &host, r#"{"only_files":[1]}"#)
+            .await
+            .starts_with("HTTP/1.1 401")
+    );
+    assert!(
+        request_body(addr, "PUT", &path, &authorized, r#"{"only_files":[1]}"#)
+            .await
+            .starts_with("HTTP/1.1 204")
+    );
+    assert!(
+        request_body(addr, "PUT", &path, &authorized, r#"{"only_files":[2]}"#)
+            .await
+            .starts_with("HTTP/1.1 409")
+    );
+    assert!(
+        request_target(addr, "GET", &path, &authorized)
+            .await
+            .contains("\"only_files\":[1]")
+    );
+    service.resume(&item.id).await.unwrap();
+    assert!(
+        request_body(addr, "PUT", &path, &authorized, r#"{"only_files":null}"#)
+            .await
+            .starts_with("HTTP/1.1 409")
+    );
+    service.pause(&item.id).await.unwrap();
+    drop(api);
+    service.stop().await;
+}
+
+#[tokio::test]
 async fn add_rejects_unauthorized_body_and_registers_paused_magnet() {
     let workspace = tempfile::tempdir().unwrap();
     let output = workspace.path().join("download");

@@ -58,10 +58,10 @@ async fn paused_file_selection_is_applied_after_resume_and_verify() {
     let root = download.join(&item.id);
     tokio::time::timeout(Duration::from_secs(5), async {
         while !root.join("b.bin").exists()
-            || !service
+            || service
                 .metrics(&item.id)
                 .await
-                .is_some_and(|metrics| metrics.observed_state == "live")
+                .is_none_or(|metrics| metrics.observed_state != "live")
         {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -88,10 +88,10 @@ async fn paused_file_selection_is_applied_after_resume_and_verify() {
     service.resume(&item.id).await.unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {
         while !root.join("a.bin").exists()
-            || !service
+            || service
                 .metrics(&item.id)
                 .await
-                .is_some_and(|metrics| metrics.observed_state == "live")
+                .is_none_or(|metrics| metrics.observed_state != "live")
         {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }

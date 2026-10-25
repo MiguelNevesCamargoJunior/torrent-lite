@@ -22,6 +22,13 @@ struct AddMagnet {
     paused: bool,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct FileSelection {
+    id: String,
+    /// Ordered, zero-based file indices. Omit to select every file.
+    only_files: Option<Vec<usize>>,
+}
+
 #[derive(Clone)]
 pub struct McpServer {
     state: PathBuf,
@@ -39,6 +46,7 @@ impl McpServer {
                 "torrent_resume",
                 "torrent_verify",
                 "torrent_remove",
+                "torrent_select_files",
             ] {
                 tool_router.remove_route(name);
             }
@@ -97,6 +105,34 @@ impl McpServer {
         }
         .await;
         result.map(ok).unwrap_or_else(|_| failed())
+    }
+
+    #[tool(description = "List indexed files and their persisted selection for a torrent")]
+    async fn torrent_files(
+        &self,
+        Parameters(TorrentId { id }): Parameters<TorrentId>,
+    ) -> CallToolResult {
+        let result: anyhow::Result<String> =
+            async { Ok(serde_json::to_string(&self.client()?.files(&id).await?)?) }.await;
+        result.map(ok).unwrap_or_else(|_| failed())
+    }
+
+    #[tool(
+        description = "Set ordered zero-based file indices for a paused torrent; omit only_files to select all"
+    )]
+    async fn torrent_select_files(
+        &self,
+        Parameters(FileSelection { id, only_files }): Parameters<FileSelection>,
+    ) -> CallToolResult {
+        if self.read_only {
+            return failed();
+        }
+        match self.client() {
+            Ok(client) if client.select_files(&id, only_files).await.is_ok() => {
+                ok(format!("Updated file selection for {id}"))
+            }
+            _ => failed(),
+        }
     }
 
     #[tool(description = "Add a v1 magnet to the running local service")]

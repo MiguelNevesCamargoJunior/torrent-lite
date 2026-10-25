@@ -7,6 +7,7 @@ use crate::{
     policy_proxy::PolicyProxy,
     safe_storage::SafeRoot,
     state_store::{AddInput, DesiredState, SourceKind, StateStore, StoredTorrent},
+    torrent_file::{TorrentSummary, inspect_torrent},
 };
 use librqbit::{
     AddTorrent, AddTorrentOptions, AddTorrentResponse, ConnectionOptions, ListenerOptions,
@@ -215,6 +216,25 @@ impl ServiceCore {
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .recover()?)
+    }
+
+    pub fn files(&self, id: &str) -> anyhow::Result<(TorrentSummary, Option<Vec<usize>>)> {
+        let store = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        let item = store
+            .recover()?
+            .into_iter()
+            .find(|item| item.id == id)
+            .ok_or_else(|| anyhow::anyhow!("torrent not found"))?;
+        let bytes = match item.source_kind {
+            SourceKind::Torrent => store.load_source(id)?,
+            SourceKind::Magnet => store
+                .load_resolved_metainfo(id)?
+                .ok_or_else(|| anyhow::anyhow!("metainfo unavailable"))?,
+        };
+        Ok((inspect_torrent(&bytes)?, store.load_file_selection(id)?))
     }
 
     pub fn proxy_connections(&self) -> u64 {
