@@ -9,3 +9,7 @@ Uma injeção compilada somente em `cfg(test)` termina um subprocesso com códig
 Um quinto caso interrompe a migração v3→v4 após `VACUUM INTO` e após as instruções SQL, antes do commit. Banco e backup devem conservar a versão v3 e o registro original. A abertura seguinte deve recusar sobrescrever o backup, com `MigrationBackupExists`; a recuperação manual exige inspecionar ambos os arquivos antes de renomear ou remover qualquer backup.
 
 Estes testes qualificam cinco limites transacionais do `StateStore`; ainda faltam interrupções durante mutações do serviço, gravação de peças, seleção de arquivos, cache de metainfo e outras fases da migração. O roadmap permanece aberto até cobrir essas fases e falhas de disco/arquivos bloqueados em Windows nativo.
+
+## Próximos limites: metainfo e seleção
+
+Um magnet com hash conhecido começa sem metainfo em cache. Um subprocesso tenta persistir metainfo validada e termina antes do commit; a reabertura deve continuar sem cache. Outro registro multifile começa com apenas o arquivo 0 selecionado. Um subprocesso tenta trocar a seleção para o arquivo 1 e termina antes do commit; a reabertura deve manter somente o arquivo 0. Ambos os casos verificam a liberação do lock ao reabrir o banco. O estado normal após commit continua coberto pelos testes de metainfo e seleção existentes.

@@ -723,6 +723,13 @@ mod crash_tests {
 
     const MAGNET: &str = "magnet:?xt=urn:btih:0000000000000000000000000000000000000001";
 
+    fn two_file_torrent() -> Vec<u8> {
+        let mut bytes = b"d4:infod5:filesld6:lengthi4e4:pathl5:a.bineed6:lengthi4e4:pathl5:b.bineee4:name4:test12:piece lengthi4e6:pieces40:".to_vec();
+        bytes.extend([0_u8; 40]);
+        bytes.extend(b"ee");
+        bytes
+    }
+
     #[test]
     fn crash_child() {
         let Ok(case) = std::env::var("TORRENT_LITE_CRASH_CASE") else {
@@ -769,6 +776,23 @@ mod crash_tests {
                         &["piece.bin"],
                         4,
                         identity,
+                    )
+                    .unwrap();
+            }
+            "resolved_metainfo" => {
+                let bytes = std::fs::read(root.join("metainfo.torrent")).unwrap();
+                store
+                    .store_resolved_metainfo(
+                        &std::env::var("TORRENT_LITE_CRASH_ID").unwrap(),
+                        &bytes,
+                    )
+                    .unwrap();
+            }
+            "file_selection" => {
+                store
+                    .set_file_selection(
+                        &std::env::var("TORRENT_LITE_CRASH_ID").unwrap(),
+                        Some(&[1]),
                     )
                     .unwrap();
             }
@@ -876,5 +900,54 @@ mod crash_tests {
             StateStore::open(&database),
             Err(StoreError::MigrationBackupExists)
         ));
+    }
+
+    #[test]
+    fn interrupted_metadata_and_selection_keep_the_previous_state() {
+        for case in ["resolved_metainfo", "file_selection"] {
+            let workspace = tempfile::tempdir().unwrap();
+            let root = workspace.path().join("downloads");
+            std::fs::create_dir(&root).unwrap();
+            let database = workspace.path().join("state.db");
+            let bytes = two_file_torrent();
+            let mut store = StateStore::open(&database).unwrap();
+            let id = if case == "resolved_metainfo" {
+                let hash = crate::torrent_file::inspect_torrent(&bytes)
+                    .unwrap()
+                    .info_hash;
+                let magnet = format!("magnet:?xt=urn:btih:{hash}");
+                std::fs::write(root.join("metainfo.torrent"), &bytes).unwrap();
+                store
+                    .register(AddInput::Magnet(&magnet), &root, true)
+                    .unwrap()
+                    .id
+            } else {
+                let id = store
+                    .register(AddInput::Torrent(&bytes), &root, true)
+                    .unwrap()
+                    .id;
+                store.set_file_selection(&id, Some(&[0])).unwrap();
+                id
+            };
+            drop(store);
+            let output = Command::new(std::env::current_exe().unwrap())
+                .arg("crash_child")
+                .arg("--nocapture")
+                .env("TORRENT_LITE_CRASH_CASE", case)
+                .env("TORRENT_LITE_CRASH_ROOT", &root)
+                .env("TORRENT_LITE_CRASH_DB", &database)
+                .env("TORRENT_LITE_CRASH_ID", &id)
+                .output()
+                .unwrap();
+            assert!(root.join("child-started").exists(), "{case}: {output:?}");
+            assert_eq!(output.status.code(), Some(86), "{case}: {output:?}");
+            let store = StateStore::open(&database).unwrap();
+            assert_eq!(store.recover().unwrap().len(), 1);
+            if case == "resolved_metainfo" {
+                assert_eq!(store.load_resolved_metainfo(&id).unwrap(), None);
+            } else {
+                assert_eq!(store.load_file_selection(&id).unwrap(), Some(vec![0]));
+            }
+        }
     }
 }
