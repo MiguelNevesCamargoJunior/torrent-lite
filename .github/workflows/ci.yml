@@ -24,10 +24,14 @@ jobs:
         run: cargo +1.91.1 clippy --locked --all-targets -- -D warnings
       - name: State store lints
         run: cargo +1.91.1 clippy --locked --all-targets --features state-store -- -D warnings
+      - name: Durable engine lints
+        run: cargo +1.91.1 clippy --locked --all-targets --features durable-engine -- -D warnings
       - name: Tests
         run: cargo +1.91.1 test --locked
       - name: Durable state tests
         run: cargo +1.91.1 test --locked --features state-store --test state_store
       - name: Local peer engine qualification
         run: cargo +1.91.1 test --locked --features engine-qualification --test engine_local
+      - name: Persistent engine storage qualification
+        run: cargo +1.91.1 test --locked --features durable-engine --test engine_persistent
 

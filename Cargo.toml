@@ -11,6 +11,7 @@ publish = false
 [features]
 engine-qualification = ["dep:anyhow", "dep:librqbit", "dep:tokio"]
 state-store = ["dep:rusqlite", "dep:uuid"]
+durable-engine = ["engine-qualification", "state-store"]
 
 [dependencies]
 anyhow = { version = "1.0", optional = true }
@@ -44,6 +45,10 @@ tempfile = "3"
 [[test]]
 name = "engine_local"
 required-features = ["engine-qualification"]
+
+[[test]]
+name = "engine_persistent"
+required-features = ["durable-engine"]
 
 [profile.release]
 lto = "thin"

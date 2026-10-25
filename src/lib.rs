@@ -1,5 +1,7 @@
 //! Bounded input validation and capability-scoped filesystem building blocks.
 
+#[cfg(feature = "durable-engine")]
+pub mod engine_storage;
 pub mod magnet;
 pub mod path_policy;
 pub mod safe_storage;
