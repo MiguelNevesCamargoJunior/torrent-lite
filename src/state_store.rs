@@ -125,6 +125,7 @@ impl StateStore {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(path.with_file_name(lock_name))?;
         match lock_file.try_lock() {
             Ok(()) => {}
