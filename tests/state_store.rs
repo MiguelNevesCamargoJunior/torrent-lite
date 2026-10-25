@@ -5,6 +5,72 @@ fn magnet(n: u64) -> String {
     format!("magnet:?xt=urn:btih:{n:040x}&dn=sample")
 }
 
+fn two_file_torrent() -> Vec<u8> {
+    let mut bytes = b"d4:infod5:filesld6:lengthi4e4:pathl5:a.bineed6:lengthi4e4:pathl5:b.bineee4:name4:test12:piece lengthi4e6:pieces40:".to_vec();
+    bytes.extend([0_u8; 40]);
+    bytes.extend(b"ee");
+    bytes
+}
+
+#[test]
+fn selected_file_indices_are_validated_and_survive_reopen() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().join("downloads");
+    std::fs::create_dir(&root).unwrap();
+    let database = workspace.path().join("state.db");
+    let bytes = two_file_torrent();
+    assert_eq!(
+        torrent_lite::torrent_file::inspect_torrent(&bytes)
+            .unwrap()
+            .files
+            .len(),
+        2
+    );
+    let id = {
+        let mut store = StateStore::open(&database).unwrap();
+        let item = store
+            .register(AddInput::Torrent(&bytes), &root, true)
+            .unwrap();
+        assert_eq!(store.load_file_selection(&item.id).unwrap(), None);
+        store.set_file_selection(&item.id, Some(&[1])).unwrap();
+        assert_eq!(store.load_file_selection(&item.id).unwrap(), Some(vec![1]));
+        for invalid in [&[][..], &[1, 1], &[1, 0], &[2]] {
+            assert!(store.set_file_selection(&item.id, Some(invalid)).is_err());
+            assert_eq!(store.load_file_selection(&item.id).unwrap(), Some(vec![1]));
+        }
+        store.set_intent(&item.id, DesiredState::Running).unwrap();
+        assert!(store.set_file_selection(&item.id, None).is_err());
+        item.id
+    };
+    let mut store = StateStore::open(&database).unwrap();
+    assert_eq!(store.load_file_selection(&id).unwrap(), Some(vec![1]));
+    store.set_intent(&id, DesiredState::Paused).unwrap();
+    store.set_file_selection(&id, None).unwrap();
+    assert_eq!(store.load_file_selection(&id).unwrap(), None);
+}
+
+#[test]
+fn v3_migration_preserves_records_and_defaults_to_all_files() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().join("downloads");
+    std::fs::create_dir(&root).unwrap();
+    let database = workspace.path().join("state.db");
+    let id = StateStore::open(&database)
+        .unwrap()
+        .register(AddInput::Torrent(&two_file_torrent()), &root, true)
+        .unwrap()
+        .id;
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute_batch("DROP TABLE file_selection; PRAGMA user_version=3;")
+        .unwrap();
+    drop(connection);
+    let store = StateStore::open(&database).unwrap();
+    assert_eq!(store.load_file_selection(&id).unwrap(), None);
+    assert_eq!(store.recover().unwrap()[0].id, id);
+    assert!(database.with_file_name("state.db.v3.bak").exists());
+}
+
 #[test]
 fn recovery_keeps_registration_order_for_the_download_queue() {
     let workspace = tempfile::tempdir().unwrap();
@@ -256,7 +322,9 @@ fn v2_migration_adds_resolved_metadata_table_with_backup() {
     drop(StateStore::open(&database).unwrap());
     let connection = rusqlite::Connection::open(&database).unwrap();
     connection
-        .execute_batch("DROP TABLE resolved_metainfo; PRAGMA user_version=2;")
+        .execute_batch(
+            "DROP TABLE resolved_metainfo; DROP TABLE file_selection; PRAGMA user_version=2;",
+        )
         .unwrap();
     drop(connection);
     drop(StateStore::open(&database).unwrap());

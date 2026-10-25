@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const APPLICATION_ID: i64 = 0x746c6974;
 const MAX_TORRENTS: i64 = 100;
 const MAX_SOURCE_BYTES: i64 = 8 * 1024 * 1024;
@@ -36,6 +36,10 @@ const CREATE_RESOLVED_METAINFO_SQL: &str = "CREATE TABLE resolved_metainfo (
                     torrent_id TEXT PRIMARY KEY NOT NULL REFERENCES torrents(id),
                     metainfo BLOB NOT NULL CHECK(length(metainfo) BETWEEN 1 AND 8388608)
                 )";
+const CREATE_FILE_SELECTION_SQL: &str = "CREATE TABLE file_selection (
+                    torrent_id TEXT PRIMARY KEY NOT NULL REFERENCES torrents(id),
+                    selection_json TEXT NOT NULL CHECK(length(selection_json) BETWEEN 3 AND 60000)
+                )";
 
 fn matches_schema(
     connection: &Connection,
@@ -50,6 +54,13 @@ fn matches_schema(
         )
         .optional()?;
     Ok(actual.as_deref() == Some(expected))
+}
+
+fn valid_file_selection(indices: &[usize], file_count: usize) -> bool {
+    !indices.is_empty()
+        && indices.len() <= 10_000
+        && indices.iter().all(|index| *index < file_count)
+        && indices.windows(2).all(|pair| pair[0] < pair[1])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,8 +227,11 @@ impl StateStore {
                 if version == 1 {
                     transaction.execute_batch(&format!("{CREATE_FILE_IDENTITIES_SQL};"))?;
                 }
+                if version <= 2 {
+                    transaction.execute_batch(&format!("{CREATE_RESOLVED_METAINFO_SQL};"))?;
+                }
                 transaction.execute_batch(&format!(
-                    "{CREATE_RESOLVED_METAINFO_SQL}; PRAGMA user_version = {SCHEMA_VERSION};"
+                    "{CREATE_FILE_SELECTION_SQL}; PRAGMA user_version = {SCHEMA_VERSION};"
                 ))?;
                 transaction.commit()?;
             }
@@ -231,11 +245,14 @@ impl StateStore {
             )? {
                 return Err(StoreError::UnsupportedSchema);
             }
+            if !matches_schema(&connection, "file_selection", CREATE_FILE_SELECTION_SQL)? {
+                return Err(StoreError::UnsupportedSchema);
+            }
         } else {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute_batch(&format!(
-                "{CREATE_TORRENTS_SQL}; {CREATE_FILE_IDENTITIES_SQL}; {CREATE_RESOLVED_METAINFO_SQL}; PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {SCHEMA_VERSION};"
+                "{CREATE_TORRENTS_SQL}; {CREATE_FILE_IDENTITIES_SQL}; {CREATE_RESOLVED_METAINFO_SQL}; {CREATE_FILE_SELECTION_SQL}; PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {SCHEMA_VERSION};"
             ))?;
             transaction.commit()?;
         }
@@ -475,6 +492,106 @@ impl StateStore {
             return Err(StoreError::Corrupt);
         }
         Ok(Some(bytes))
+    }
+
+    pub fn validate_file_selection(
+        &self,
+        id: &str,
+        indices: Option<&[usize]>,
+    ) -> Result<(), StoreError> {
+        let record: Option<(String, String)> = self
+            .connection
+            .query_row(
+                "SELECT source_kind,desired FROM torrents WHERE id=?1 AND tombstone=0",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let (kind, desired) = record.ok_or(StoreError::NotFound)?;
+        if desired != "paused" {
+            return Err(StoreError::Conflict);
+        }
+        if let Some(indices) = indices {
+            let source = match kind.as_str() {
+                "torrent" => self.load_source(id)?,
+                "magnet" => self
+                    .load_resolved_metainfo(id)?
+                    .ok_or(StoreError::Conflict)?,
+                _ => return Err(StoreError::Corrupt),
+            };
+            let file_count = inspect_torrent(&source)?.files.len();
+            if !valid_file_selection(indices, file_count) {
+                return Err(StoreError::Conflict);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn set_file_selection(
+        &mut self,
+        id: &str,
+        indices: Option<&[usize]>,
+    ) -> Result<(), StoreError> {
+        self.validate_file_selection(id, indices)?;
+        if let Some(indices) = indices {
+            let json = serde_json::to_string(indices).map_err(|_| StoreError::Corrupt)?;
+            self.connection.execute(
+                "INSERT INTO file_selection(torrent_id,selection_json) VALUES (?1,?2)
+                 ON CONFLICT(torrent_id) DO UPDATE SET selection_json=excluded.selection_json",
+                params![id, json],
+            )?;
+        } else {
+            self.connection
+                .execute("DELETE FROM file_selection WHERE torrent_id=?1", [id])?;
+        }
+        Ok(())
+    }
+
+    pub fn load_file_selection(&self, id: &str) -> Result<Option<Vec<usize>>, StoreError> {
+        let kind: String = self
+            .connection
+            .query_row(
+                "SELECT source_kind FROM torrents WHERE id=?1 AND tombstone=0",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        let length: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT length(selection_json) FROM file_selection WHERE torrent_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(length) = length else {
+            return Ok(None);
+        };
+        if !(3..=60_000).contains(&length) {
+            return Err(StoreError::Corrupt);
+        }
+        let json: String = self.connection.query_row(
+            "SELECT selection_json FROM file_selection WHERE torrent_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        let indices: Vec<usize> = serde_json::from_str(&json).map_err(|_| StoreError::Corrupt)?;
+        let source = match kind.as_str() {
+            "torrent" => self.load_source(id)?,
+            "magnet" => self
+                .load_resolved_metainfo(id)?
+                .ok_or(StoreError::Corrupt)?,
+            _ => return Err(StoreError::Corrupt),
+        };
+        let file_count = inspect_torrent(&source)
+            .map_err(|_| StoreError::Corrupt)?
+            .files
+            .len();
+        if !valid_file_selection(&indices, file_count) {
+            return Err(StoreError::Corrupt);
+        }
+        Ok(Some(indices))
     }
 
     pub fn record_file_identity(

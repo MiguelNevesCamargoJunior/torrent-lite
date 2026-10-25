@@ -32,6 +32,76 @@ fn bandwidth_settings_reject_values_that_the_engine_cannot_apply() {
 }
 
 #[tokio::test]
+async fn paused_file_selection_is_applied_after_resume_and_verify() {
+    let workspace = tempfile::tempdir().unwrap();
+    let download = workspace.path().join("download");
+    std::fs::create_dir(&download).unwrap();
+    let database = workspace.path().join("state.db");
+    let mut metainfo = b"d4:infod5:filesld6:lengthi4e4:pathl5:a.bineed6:lengthi4e4:pathl5:b.bineee4:name4:test12:piece lengthi4e6:pieces40:".to_vec();
+    metainfo.extend([0_u8; 40]);
+    metainfo.extend(b"ee");
+    let service = ServiceCore::open(&database, &download, DestinationPolicy::AllowLan)
+        .await
+        .unwrap();
+    let item = service.add_torrent(&metainfo, true).await.unwrap();
+    service
+        .set_file_selection(&item.id, Some(vec![1]))
+        .await
+        .unwrap();
+    assert!(
+        service
+            .set_file_selection(&item.id, Some(vec![2]))
+            .await
+            .is_err()
+    );
+    service.resume(&item.id).await.unwrap();
+    let root = download.join(&item.id);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !root.join("b.bin").exists()
+            || !service
+                .metrics(&item.id)
+                .await
+                .is_some_and(|metrics| metrics.observed_state == "live")
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!root.join("a.bin").exists());
+    service.pause(&item.id).await.unwrap();
+    service.stop().await;
+    drop(service);
+
+    let store = StateStore::open(&database).unwrap();
+    assert_eq!(store.load_file_selection(&item.id).unwrap(), Some(vec![1]));
+    drop(store);
+    let service = ServiceCore::open(&database, &download, DestinationPolicy::AllowLan)
+        .await
+        .unwrap();
+    service.verify(&item.id).await.unwrap();
+    assert!(!root.join("a.bin").exists());
+    service
+        .set_file_selection(&item.id, Some(vec![0]))
+        .await
+        .unwrap();
+    service.resume(&item.id).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !root.join("a.bin").exists()
+            || !service
+                .metrics(&item.id)
+                .await
+                .is_some_and(|metrics| metrics.observed_state == "live")
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    service.stop().await;
+}
+
+#[tokio::test]
 async fn service_applies_global_bandwidth_limits_to_the_engine() {
     let workspace = tempfile::tempdir().unwrap();
     let download = workspace.path().join("download");

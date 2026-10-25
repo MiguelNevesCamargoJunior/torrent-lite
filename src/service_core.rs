@@ -347,6 +347,31 @@ impl ServiceCore {
         self.reconcile_locked(false).await
     }
 
+    pub async fn set_file_selection(
+        &self,
+        id: &str,
+        indices: Option<Vec<usize>>,
+    ) -> anyhow::Result<()> {
+        let _guard = self.mutation.lock().await;
+        self.state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .validate_file_selection(id, indices.as_deref())?;
+        let current_handle = { self.handles.lock().await.get(id).cloned() };
+        if let Some(handle) = current_handle {
+            self.session
+                .delete(TorrentIdOrHash::Id(handle.id()), false)
+                .await?;
+            self.handles.lock().await.remove(id);
+        }
+        self.state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .set_file_selection(id, indices.as_deref())?;
+        self.failures.lock().await.remove(id);
+        Ok(())
+    }
+
     /// Recheck every piece without network traffic, then restore the stored intent.
     pub async fn verify(&self, id: &str) -> anyhow::Result<()> {
         let _guard = self.mutation.lock().await;
@@ -634,6 +659,11 @@ impl ServiceCore {
         if self.handles.lock().await.contains_key(&item.id) {
             return Ok(());
         }
+        let only_files = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .load_file_selection(&item.id)?;
         let torrent_root = Arc::new(self.root.subdir(&item.id)?);
         let pending = self.session.add_torrent(
             source,
@@ -641,6 +671,7 @@ impl ServiceCore {
                 paused: start_paused,
                 overwrite: true,
                 peer_limit: Some(50),
+                only_files,
                 storage_factory: Some(
                     DurableStorageFactory::new(torrent_root, self.state.clone(), item.id.clone())
                         .boxed(),
