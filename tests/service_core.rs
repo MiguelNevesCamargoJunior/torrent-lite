@@ -139,6 +139,49 @@ async fn pending_magnet_releases_its_slot_and_cannot_reactivate_after_removal() 
 }
 
 #[tokio::test]
+async fn failed_metadata_resolution_releases_the_slot_and_backs_off() {
+    let workspace = tempfile::tempdir().unwrap();
+    let download = workspace.path().join("download");
+    std::fs::create_dir(&download).unwrap();
+    let database = workspace.path().join("state.db");
+    let magnet = "magnet:?xt=urn:btih:0000000000000000000000000000000000000001";
+    // Older state can contain a magnet without a tracker, even though new
+    // service additions require one while DHT is disabled.
+    let pending = StateStore::open(&database)
+        .unwrap()
+        .register(AddInput::Magnet(magnet), &download, false)
+        .unwrap();
+    let service =
+        ServiceCore::open_with_limit(&database, &download, DestinationPolicy::AllowLan, 1)
+            .await
+            .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            service.tick_queue().await.unwrap();
+            if service.activation_failure(&pending.id).await.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("failed metadata resolution did not release its slot");
+    let (code, retry) = service.activation_failure(&pending.id).await.unwrap();
+    assert_eq!(code, "activation_failed");
+    assert!(retry <= 2);
+    service.tick_queue().await.unwrap();
+    assert!(!service.is_resolving_magnet(&pending.id).await);
+
+    let mut metainfo = b"d4:infod6:lengthi4e4:name8:file.txt12:piece lengthi4e6:pieces20:".to_vec();
+    metainfo.extend([0_u8; 20]);
+    metainfo.extend(b"ee");
+    let local = service.add_torrent(&metainfo, false).await.unwrap();
+    assert!(service.metrics(&local.id).await.is_some());
+    assert!(service.metrics(&pending.id).await.is_none());
+    service.stop().await;
+}
+
+#[tokio::test]
 async fn queue_limits_active_downloads_and_survives_restart() {
     let workspace = tempfile::tempdir().unwrap();
     let source = workspace.path().join("source");
