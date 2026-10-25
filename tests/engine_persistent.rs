@@ -12,6 +12,7 @@ use torrent_lite::{
     engine_storage::DurableStorageFactory,
     safe_storage::SafeRoot,
     state_store::{AddInput, StateStore},
+    torrent_file::inspect_torrent,
 };
 
 fn isolated_options() -> SessionOptions {
@@ -29,6 +30,86 @@ fn isolated_options() -> SessionOptions {
         peer_limit: Some(2),
         ..Default::default()
     }
+}
+
+#[tokio::test]
+async fn selecting_one_file_downloads_only_its_pieces_and_keeps_other_files_absent() {
+    let workspace = tempfile::tempdir().unwrap();
+    let source = workspace.path().join("source");
+    let destination = workspace.path().join("destination");
+    std::fs::create_dir(&source).unwrap();
+    std::fs::create_dir(&destination).unwrap();
+    let wanted = vec![7_u8; 32 * 1024];
+    for (name, contents) in [
+        ("first.bin", vec![1_u8; 32 * 1024]),
+        ("wanted.bin", wanted.clone()),
+        ("last.bin", vec![3_u8; 32 * 1024]),
+    ] {
+        std::fs::write(source.join(name), contents).unwrap();
+    }
+    let seeder = Session::new_with_opts(source.clone(), isolated_options())
+        .await
+        .unwrap();
+    let (torrent, _) = seeder
+        .create_and_serve_torrent(
+            &source,
+            CreateTorrentOptions {
+                piece_length: Some(16 * 1024),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let metainfo = torrent.as_bytes().unwrap();
+    let summary = inspect_torrent(&metainfo).unwrap();
+    let wanted_index = summary
+        .files
+        .iter()
+        .position(|file| file.path.last().is_some_and(|name| name == "wanted.bin"))
+        .unwrap();
+    let database = workspace.path().join("state.db");
+    let torrent_id = StateStore::open(&database)
+        .unwrap()
+        .register(AddInput::Torrent(&metainfo), &destination, false)
+        .unwrap()
+        .id;
+    let state = Arc::new(Mutex::new(StateStore::open(&database).unwrap()));
+    let root = Arc::new(SafeRoot::open(&destination).unwrap());
+    let leecher = Session::new_with_opts(destination.clone(), isolated_options())
+        .await
+        .unwrap();
+    let handle = leecher
+        .add_torrent(
+            AddTorrent::from_bytes(metainfo),
+            Some(AddTorrentOptions {
+                initial_peers: Some(vec![seeder.listen_addr().unwrap()]),
+                only_files: Some(vec![wanted_index]),
+                overwrite: true,
+                storage_factory: Some(DurableStorageFactory::new(root, state, torrent_id).boxed()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .into_handle()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(20), handle.wait_until_completed())
+        .await
+        .unwrap()
+        .unwrap();
+    for (index, file) in summary.files.iter().enumerate() {
+        let path = file
+            .path
+            .iter()
+            .fold(destination.clone(), |path, part| path.join(part));
+        if index == wanted_index {
+            assert_eq!(std::fs::read(path).unwrap(), wanted);
+        } else {
+            assert!(!path.exists(), "unselected file was created: {path:?}");
+        }
+    }
+    leecher.stop().await;
+    seeder.stop().await;
 }
 
 #[tokio::test]

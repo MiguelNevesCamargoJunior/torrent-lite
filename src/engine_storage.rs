@@ -46,6 +46,7 @@ impl StorageFactory for DurableStorageFactory {
             state: self.state.clone(),
             torrent_id: self.torrent_id.clone(),
             files: Vec::new(),
+            paths: Vec::new(),
             lengths: Vec::new(),
         })
     }
@@ -59,7 +60,8 @@ pub struct DurableStorage {
     root: Arc<SafeRoot>,
     state: Arc<Mutex<StateStore>>,
     torrent_id: String,
-    files: Vec<Mutex<cap_std::fs::File>>,
+    files: Vec<Mutex<Option<cap_std::fs::File>>>,
+    paths: Vec<Vec<String>>,
     lengths: Vec<u64>,
 }
 
@@ -95,10 +97,30 @@ impl DurableStorage {
         Ok(file)
     }
 
-    fn file(&self, file_id: usize) -> anyhow::Result<&Mutex<cap_std::fs::File>> {
+    fn file(&self, file_id: usize) -> anyhow::Result<&Mutex<Option<cap_std::fs::File>>> {
         self.files
             .get(file_id)
             .ok_or_else(|| anyhow::anyhow!("invalid file index"))
+    }
+
+    fn open_for_write<'a>(
+        &self,
+        file_id: usize,
+        slot: &'a mut Option<cap_std::fs::File>,
+    ) -> anyhow::Result<&'a mut cap_std::fs::File> {
+        if slot.is_none() {
+            let path = self
+                .paths
+                .get(file_id)
+                .ok_or_else(|| anyhow::anyhow!("invalid file index"))?;
+            let length = *self
+                .lengths
+                .get(file_id)
+                .ok_or_else(|| anyhow::anyhow!("invalid file index"))?;
+            *slot = Some(self.open_file(file_id, path, length, None)?);
+        }
+        slot.as_mut()
+            .ok_or_else(|| anyhow::anyhow!("file unavailable"))
     }
 
     fn check_range(&self, file_id: usize, offset: u64, count: usize) -> anyhow::Result<()> {
@@ -158,8 +180,11 @@ impl TorrentStorage for DurableStorage {
             *slot = Some(record);
         }
         for (index, (info, path)) in metadata.file_infos.iter().zip(&paths).enumerate() {
-            let file = self.open_file(index, path, info.len, identities[index])?;
+            let file = identities[index]
+                .map(|record| self.open_file(index, path, info.len, Some(record)))
+                .transpose()?;
             self.files.push(Mutex::new(file));
+            self.paths.push(path.clone());
             self.lengths.push(info.len);
         }
         Ok(())
@@ -171,6 +196,9 @@ impl TorrentStorage for DurableStorage {
             .file(file_id)?
             .lock()
             .map_err(|_| anyhow::anyhow!("file lock poisoned"))?;
+        let file = file
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("file has not been created"))?;
         file.seek(SeekFrom::Start(offset))?;
         file.read_exact(buf)?;
         Ok(())
@@ -182,6 +210,7 @@ impl TorrentStorage for DurableStorage {
             .file(file_id)?
             .lock()
             .map_err(|_| anyhow::anyhow!("file lock poisoned"))?;
+        let file = self.open_for_write(file_id, &mut file)?;
         file.seek(SeekFrom::Start(offset))?;
         file.write_all(buf)?;
         Ok(())
@@ -199,10 +228,11 @@ impl TorrentStorage for DurableStorage {
             self.lengths.get(file_id) == Some(&length),
             "unexpected file length"
         );
-        self.file(file_id)?
+        let mut file = self
+            .file(file_id)?
             .lock()
-            .map_err(|_| anyhow::anyhow!("file lock poisoned"))?
-            .set_len(length)?;
+            .map_err(|_| anyhow::anyhow!("file lock poisoned"))?;
+        self.open_for_write(file_id, &mut file)?.set_len(length)?;
         Ok(())
     }
 
@@ -214,7 +244,9 @@ impl TorrentStorage for DurableStorage {
                 Ok(Mutex::new(
                     file.lock()
                         .map_err(|_| anyhow::anyhow!("file lock poisoned"))?
-                        .try_clone()?,
+                        .as_ref()
+                        .map(cap_std::fs::File::try_clone)
+                        .transpose()?,
                 ))
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
@@ -223,6 +255,7 @@ impl TorrentStorage for DurableStorage {
             state: self.state.clone(),
             torrent_id: self.torrent_id.clone(),
             files,
+            paths: self.paths.clone(),
             lengths: self.lengths.clone(),
         }))
     }
