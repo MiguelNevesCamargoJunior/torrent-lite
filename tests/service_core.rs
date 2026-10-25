@@ -117,6 +117,10 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     std::fs::write(&downloaded, corrupted).unwrap();
     service.verify(&item.id).await.unwrap();
     assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);
+    assert_eq!(
+        service.metrics(&item.id).await.unwrap().observed_state,
+        "paused"
+    );
     let (checked, total, finished) = service.progress(&item.id).await.unwrap();
     assert!(checked < total);
     assert!(!finished);

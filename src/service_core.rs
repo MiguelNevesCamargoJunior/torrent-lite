@@ -267,10 +267,11 @@ impl ServiceCore {
         }
         self.activate_source(&item, AddTorrent::from_bytes(bytes), None, true)
             .await?;
-        if item.desired == DesiredState::Running
-            && let Some(handle) = self.handles.lock().await.get(id).cloned()
-        {
-            self.session.unpause(&handle).await?;
+        let checked_handle = { self.handles.lock().await.get(id).cloned() }
+            .ok_or_else(|| anyhow::anyhow!("verification handle unavailable"))?;
+        checked_handle.wait_until_initialized().await?;
+        if item.desired == DesiredState::Running {
+            self.session.unpause(&checked_handle).await?;
         }
         Ok(())
     }

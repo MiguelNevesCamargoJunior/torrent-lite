@@ -272,10 +272,10 @@ async fn verify(
 ) -> Result<StatusCode, StatusCode> {
     authorize(&headers, &state)?;
     require_id(&state, &id)?;
-    state
-        .service
-        .verify(&id)
+    let service = state.service.clone();
+    tokio::spawn(async move { service.verify(&id).await })
         .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
     Ok(StatusCode::NO_CONTENT)
 }
