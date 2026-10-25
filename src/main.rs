@@ -29,6 +29,15 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Download a local v1 .torrent using the experimental persistent service.
+    #[cfg(feature = "service-core")]
+    DownloadTorrent {
+        path: std::path::PathBuf,
+        #[arg(long)]
+        output: std::path::PathBuf,
+        #[arg(long)]
+        state: std::path::PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -49,6 +58,12 @@ fn main() -> ExitCode {
         }
     };
     let output = match command {
+        #[cfg(feature = "service-core")]
+        Commands::DownloadTorrent {
+            path,
+            output,
+            state,
+        } => return download_torrent(path, output, state),
         Commands::InspectMagnet { magnet, json } => {
             let value = match Magnet::parse(&magnet) {
                 Ok(value) => value,
@@ -109,6 +124,58 @@ fn main() -> ExitCode {
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
         Err(_) => {
             eprintln!("error: unable to write output");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(feature = "service-core")]
+fn download_torrent(
+    path: std::path::PathBuf,
+    output: std::path::PathBuf,
+    state: std::path::PathBuf,
+) -> ExitCode {
+    use torrent_lite::{network_policy::DestinationPolicy, service_core::ServiceCore};
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(_) => {
+            eprintln!("error: unable to open torrent file");
+            return ExitCode::from(2);
+        }
+    };
+    let mut bytes = Vec::new();
+    if file
+        .take(8 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        eprintln!("error: unable to read torrent file");
+        return ExitCode::from(2);
+    }
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => {
+            eprintln!("error: unable to start runtime");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = runtime.block_on(async {
+        let service = ServiceCore::open(&state, &output, DestinationPolicy::PublicOnly).await?;
+        let item = service.add_torrent(&bytes, false).await?;
+        let result = service.wait_completed(&item.id).await;
+        service.stop().await;
+        result.map(|()| item.info_hash)
+    });
+    match result {
+        Ok(hash) => {
+            println!("Completed: {hash}");
+            ExitCode::SUCCESS
+        }
+        Err(_) => {
+            eprintln!("error: download did not complete; inspect the state and try again");
             ExitCode::FAILURE
         }
     }
