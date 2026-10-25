@@ -94,6 +94,21 @@ fn unknown_future_schema_fails_closed() {
 }
 
 #[test]
+fn declared_version_without_expected_table_fails_closed() {
+    let workspace = tempfile::tempdir().unwrap();
+    let database = workspace.path().join("inconsistent.db");
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute_batch("PRAGMA application_id=1953261940; PRAGMA user_version=1;")
+        .unwrap();
+    drop(connection);
+    assert!(matches!(
+        StateStore::open(&database),
+        Err(StoreError::UnsupportedSchema)
+    ));
+}
+
+#[test]
 fn metadata_and_registration_count_are_bounded() {
     let workspace = tempfile::tempdir().unwrap();
     let root = workspace.path().join("downloads");

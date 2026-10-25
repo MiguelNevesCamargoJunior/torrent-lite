@@ -8,6 +8,15 @@ const SCHEMA_VERSION: i64 = 1;
 const APPLICATION_ID: i64 = 0x746c6974;
 const MAX_TORRENTS: i64 = 100;
 const MAX_SOURCE_BYTES: i64 = 8 * 1024 * 1024;
+const CREATE_TORRENTS_SQL: &str = "CREATE TABLE torrents (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    info_hash TEXT NOT NULL UNIQUE,
+                    source_kind TEXT NOT NULL CHECK(source_kind IN ('magnet','torrent')),
+                    source BLOB NOT NULL,
+                    destination_root TEXT NOT NULL,
+                    desired TEXT NOT NULL CHECK(desired IN ('running','paused')),
+                    tombstone INTEGER NOT NULL DEFAULT 0 CHECK(tombstone IN (0,1))
+                )";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesiredState {
@@ -108,22 +117,22 @@ impl StateStore {
             if version != SCHEMA_VERSION || app_id != APPLICATION_ID {
                 return Err(StoreError::UnsupportedSchema);
             }
+            let actual_schema: Option<String> = connection
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='torrents'",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if actual_schema.as_deref() != Some(CREATE_TORRENTS_SQL) {
+                return Err(StoreError::UnsupportedSchema);
+            }
         } else {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            transaction.execute_batch(
-                "CREATE TABLE torrents (
-                    id TEXT PRIMARY KEY NOT NULL,
-                    info_hash TEXT NOT NULL UNIQUE,
-                    source_kind TEXT NOT NULL CHECK(source_kind IN ('magnet','torrent')),
-                    source BLOB NOT NULL,
-                    destination_root TEXT NOT NULL,
-                    desired TEXT NOT NULL CHECK(desired IN ('running','paused')),
-                    tombstone INTEGER NOT NULL DEFAULT 0 CHECK(tombstone IN (0,1))
-                );
-                PRAGMA application_id = 1953261940;
-                PRAGMA user_version = 1;",
-            )?;
+            transaction.execute_batch(&format!(
+                "{CREATE_TORRENTS_SQL}; PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {SCHEMA_VERSION};"
+            ))?;
             transaction.commit()?;
         }
         connection.execute_batch(
