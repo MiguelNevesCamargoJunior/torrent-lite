@@ -36,7 +36,7 @@ Inspect a local v1 metainfo file without starting a download:
 cargo run --locked -- inspect-torrent path/to/file.torrent --json
 ```
 
-The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The feature-gated service passed a synthetic pause, restart and tracker download test on Windows, Linux and macOS. Forced-process crash testing, bandwidth limits and public swarm performance qualification are pending.
+The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The feature-gated service passed synthetic pause, restart, tracker download, selected-file transfer and bounded seeding tests on Windows, Linux and macOS. A forced process stop test covers paused addition and removal; crash injection at every mutation, low-disk behavior and public swarm performance qualification are pending.
 
 ## Experimental foreground download
 

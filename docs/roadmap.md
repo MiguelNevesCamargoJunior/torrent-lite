@@ -11,6 +11,9 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 - [x] MCP stdio adapter and ephemeral browser dashboard with local controls, subject to CI qualification.
 - [x] Explicit piece recheck for `.torrent` records, subject to CI qualification.
 - [x] Bounded persistent download queue and optional global bandwidth caps at service startup, subject to CI qualification.
+- [x] Persisted file selection across CLI, API, MCP and browser controls, qualified with multifile local transfers.
+- [x] Optional bounded seeding slots with a configured peer capacity ceiling, qualified with local transfers and restart recheck.
+- [x] Forced process stop after paused addition and removal retains intent and tombstones on restart.
 
 ## Required before a stable release
 
