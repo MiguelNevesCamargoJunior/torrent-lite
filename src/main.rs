@@ -14,7 +14,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Show a read-only local dashboard in your browser.
+    /// Show the local transfer dashboard and controls in your browser.
     #[cfg(feature = "browser-ui")]
     Ui {
         #[arg(long)]

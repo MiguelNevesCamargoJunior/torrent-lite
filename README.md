@@ -8,7 +8,7 @@ The approved design targets one download service with a CLI, a local browser UI 
 
 ## Development status
 
-The current foundation establishes input validation, an offline inspection CLI and a qualified `librqbit` engine. A capability-scoped helper opens files inside a chosen root. A feature-gated SQLite store persists torrent intent, tombstones and file identities; it can migrate its v1 schema after creating a backup. An experimental foreground service uses those identities, rechecks pieces on restart, and routes outbound TCP through a local authenticated policy proxy. Experimental CLI commands download local `.torrent` files and v1 magnets with HTTP(S) trackers. A loopback-only API and owner-scoped endpoint discovery support commands for adding, listing, pausing, resuming and removing torrents. An MCP stdio adapter and read-only local browser dashboard are now experimental.
+The current foundation establishes input validation, an offline inspection CLI and a qualified `librqbit` engine. A capability-scoped helper opens files inside a chosen root. A feature-gated SQLite store persists torrent intent, tombstones and file identities; it can migrate its v1 schema after creating a backup. An experimental foreground service uses those identities, rechecks pieces on restart, and routes outbound TCP through a local authenticated policy proxy. Experimental CLI commands download local `.torrent` files and v1 magnets with HTTP(S) trackers. A loopback-only API and owner-scoped endpoint discovery support commands for adding, listing, pausing, resuming and removing torrents. An MCP stdio adapter and local browser dashboard are now experimental.
 
 - [Design](docs/superpowers/specs/2026-10-25-torrent-design.md) (Portuguese)
 - [Initial implementation plan](docs/superpowers/plans/2026-10-25-foundation.md)
@@ -80,7 +80,7 @@ cargo run --locked --features api-client -- remove TORRENT_ID --state path/to/st
 cargo run --locked --features browser-ui -- ui --state path/to/state.db
 ```
 
-Open the local URL printed by `ui`. The dashboard refreshes every two seconds, shows verified progress and available engine speed/peer estimates, and contains no external resources. Unknown values appear as unavailable. Closing `ui` does not stop downloads. The URL grants read-only access while that `ui` process runs, so treat it as private.
+Open the local URL printed by `ui`. The dashboard refreshes every two seconds, shows verified progress and available engine speed/peer estimates, and lets you add magnets or `.torrent` files, pause, resume, verify and remove records. Removing a record preserves downloaded files. Unknown values appear as unavailable. Closing `ui` does not stop downloads. The URL gives access to local controls while the `ui` process runs, so treat it as private. Browser mutations require a separate temporary CSRF token and exact same-origin requests; see [UI security design](docs/ui-plan.md).
 
 For MCP clients that launch a stdio command:
 

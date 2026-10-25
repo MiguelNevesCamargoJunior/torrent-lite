@@ -54,6 +54,7 @@ impl LocalClient {
             .http
             .post(format!("http://{}/api/v1/torrents", self.addr))
             .bearer_auth(&self.token)
+            .timeout(Duration::from_secs(40))
             .json(&body)
             .send()
             .await?

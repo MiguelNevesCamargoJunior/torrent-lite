@@ -1,4 +1,9 @@
-use std::{net::Ipv4Addr, sync::Arc, time::Duration};
+use librqbit::{CreateTorrentOptions, ListenerOptions, Session, SessionOptions};
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -62,6 +67,162 @@ async fn local_dashboard_requires_ephemeral_path_and_restricts_browser() {
     let data = get(addr, &format!("{}data", ui.page_path()), &addr.to_string()).await;
     assert!(data.starts_with("HTTP/1.1 200"));
     assert!(data.contains("[]"));
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let base = format!("http://{addr}{}", ui.page_path());
+    let csrf_response = client.get(format!("{base}csrf")).send().await.unwrap();
+    assert_eq!(csrf_response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        csrf_response.headers()["cache-control"].to_str().unwrap(),
+        "no-store"
+    );
+    let csrf_body: serde_json::Value = csrf_response.json().await.unwrap();
+    let csrf = csrf_body["token"].as_str().unwrap();
+    assert_ne!(csrf, api.token());
+    assert_eq!(csrf.len(), 64);
+    let item = service
+        .add_magnet_with_pause(
+            "magnet:?xt=urn:btih:0000000000000000000000000000000000000001&tr=https://tracker.example/announce",
+            true,
+        )
+        .await
+        .unwrap();
+    let remove_url = format!("{base}torrents/{}/remove", item.id);
+    let origin = format!("http://{addr}");
+    let missing_origin = client
+        .post(&remove_url)
+        .header("content-type", "application/json")
+        .header("x-csrf-token", csrf)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_origin.status(), reqwest::StatusCode::FORBIDDEN);
+    let foreign_origin = client
+        .post(&remove_url)
+        .header("origin", "https://attacker.invalid")
+        .header("content-type", "application/json")
+        .header("x-csrf-token", csrf)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(foreign_origin.status(), reqwest::StatusCode::FORBIDDEN);
+    let missing_token = client
+        .post(&remove_url)
+        .header("origin", &origin)
+        .header("content-type", "application/json")
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_token.status(), reqwest::StatusCode::FORBIDDEN);
+    let wrong_media = client
+        .post(format!("{base}add-torrent"))
+        .header("origin", &origin)
+        .header("x-csrf-token", csrf)
+        .header("content-type", "text/plain")
+        .body("not a torrent")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        wrong_media.status(),
+        reqwest::StatusCode::UNSUPPORTED_MEDIA_TYPE
+    );
+    let too_large = client
+        .post(format!("{base}add-magnet"))
+        .header("origin", &origin)
+        .header("x-csrf-token", csrf)
+        .header("content-type", "application/json")
+        .body(vec![b'a'; 16 * 1024 + 1])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(too_large.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(service.list().unwrap().len(), 1);
+    let valid = client
+        .post(&remove_url)
+        .header("origin", &origin)
+        .header("content-type", "application/json")
+        .header("x-csrf-token", csrf)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(valid.status(), reqwest::StatusCode::NO_CONTENT);
+    assert!(service.list().unwrap().is_empty());
+    let added_magnet = client
+        .post(format!("{base}add-magnet"))
+        .header("origin", &origin)
+        .header("x-csrf-token", csrf)
+        .json(&serde_json::json!({
+            "magnet": "magnet:?xt=urn:btih:0000000000000000000000000000000000000002&tr=https://tracker.example/announce",
+            "paused": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(added_magnet.status(), reqwest::StatusCode::CREATED);
+    assert_eq!(service.list().unwrap().len(), 1);
+    assert_eq!(
+        service.list().unwrap()[0].desired,
+        torrent_lite::state_store::DesiredState::Paused
+    );
+    let added_id = service.list().unwrap()[0].id.clone();
+    let removed_magnet = client
+        .post(format!("{base}torrents/{added_id}/remove"))
+        .header("origin", &origin)
+        .header("x-csrf-token", csrf)
+        .header("content-type", "application/json")
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(removed_magnet.status(), reqwest::StatusCode::NO_CONTENT);
+
+    let source = workspace.path().join("source");
+    std::fs::create_dir(&source).unwrap();
+    let source_file = source.join("sample.bin");
+    std::fs::write(&source_file, vec![17_u8; 16 * 1024]).unwrap();
+    let seeder = Session::new_with_opts(
+        source,
+        SessionOptions {
+            dht: None,
+            disable_trackers: true,
+            disable_local_service_discovery: true,
+            persistence: None,
+            listen: Some(ListenerOptions {
+                listen_addr: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+                ipv4_only: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let (torrent, _) = seeder
+        .create_and_serve_torrent(
+            &source_file,
+            CreateTorrentOptions {
+                piece_length: Some(16 * 1024),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let uploaded = client
+        .post(format!("{base}add-torrent"))
+        .header("origin", &origin)
+        .header("x-csrf-token", csrf)
+        .header("content-type", "application/x-bittorrent")
+        .body(torrent.as_bytes().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(uploaded.status(), reqwest::StatusCode::CREATED);
+    assert_eq!(service.list().unwrap().len(), 1);
+    seeder.stop().await;
     drop(ui);
     drop(lease);
     drop(api);

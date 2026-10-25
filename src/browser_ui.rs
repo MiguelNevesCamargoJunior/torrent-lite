@@ -1,16 +1,19 @@
-//! Ephemeral, read-only browser dashboard over the authenticated local client.
+//! Ephemeral browser dashboard over the authenticated local client.
 
 use crate::api_client::LocalClient;
+use crate::local_api::AddView;
 use axum::{
     Json, Router,
-    extract::{Path as RoutePath, State},
+    body::to_bytes,
+    extract::{Path as RoutePath, Request, State},
     http::{
         HeaderMap, HeaderValue, StatusCode,
-        header::{HOST, ORIGIN},
+        header::{CONTENT_TYPE, HOST, ORIGIN},
     },
     response::Html,
-    routing::get,
+    routing::{get, post},
 };
+use serde::{Deserialize, Serialize};
 use std::{
     io,
     net::{Ipv4Addr, SocketAddr},
@@ -21,11 +24,27 @@ use tokio::{net::TcpListener, task::JoinHandle};
 
 const DASHBOARD: &str = include_str!("dashboard.html");
 const CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const MAX_MAGNET_BODY: usize = 16 * 1024;
+const MAX_TORRENT_BODY: usize = 8 * 1024 * 1024;
+
+#[derive(Serialize)]
+struct CsrfView {
+    token: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MagnetRequest {
+    magnet: String,
+    #[serde(default)]
+    paused: bool,
+}
 
 #[derive(Clone)]
 struct UiState {
     client: Arc<LocalClient>,
     secret: Arc<str>,
+    csrf: Arc<str>,
     host: Arc<str>,
     origin: Arc<str>,
 }
@@ -47,15 +66,27 @@ impl BrowserUi {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
+        let mut csrf_random = [0_u8; 32];
+        getrandom::fill(&mut csrf_random)
+            .map_err(|_| io::Error::other("OS randomness unavailable"))?;
+        let csrf = csrf_random
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
         let state = UiState {
             client,
             secret: Arc::from(secret.as_str()),
+            csrf: Arc::from(csrf.as_str()),
             host: Arc::from(addr.to_string()),
             origin: Arc::from(format!("http://{addr}")),
         };
         let router = Router::new()
             .route("/{key}/", get(page))
             .route("/{key}/data", get(data))
+            .route("/{key}/csrf", get(csrf_token))
+            .route("/{key}/add-magnet", post(add_magnet))
+            .route("/{key}/add-torrent", post(add_torrent))
+            .route("/{key}/torrents/{id}/{action}", post(mutate_torrent))
             .with_state(state);
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
@@ -132,4 +163,120 @@ async fn data(
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     Ok((response_headers(), Json(rows)))
+}
+
+async fn csrf_token(
+    State(state): State<UiState>,
+    RoutePath(key): RoutePath<String>,
+    headers: HeaderMap,
+) -> Result<(HeaderMap, Json<CsrfView>), StatusCode> {
+    check(&headers, &key, &state)?;
+    Ok((
+        response_headers(),
+        Json(CsrfView {
+            token: state.csrf.to_string(),
+        }),
+    ))
+}
+
+fn constant_time_equal(actual: &[u8], expected: &[u8]) -> bool {
+    actual.len() == expected.len()
+        && actual
+            .iter()
+            .zip(expected)
+            .fold(0_u8, |difference, (a, b)| difference | (a ^ b))
+            == 0
+}
+
+fn check_mutation(
+    headers: &HeaderMap,
+    key: &str,
+    state: &UiState,
+    content_type: &str,
+) -> Result<(), StatusCode> {
+    check(headers, key, state)?;
+    if headers.get(ORIGIN).and_then(|value| value.to_str().ok()) != Some(state.origin.as_ref()) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let token = headers
+        .get("x-csrf-token")
+        .map(|value| value.as_bytes())
+        .unwrap_or_default();
+    if !constant_time_equal(token, state.csrf.as_bytes()) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        != Some(content_type)
+    {
+        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+    Ok(())
+}
+
+async fn add_magnet(
+    State(state): State<UiState>,
+    RoutePath(key): RoutePath<String>,
+    request: Request,
+) -> Result<(StatusCode, HeaderMap, Json<AddView>), StatusCode> {
+    check_mutation(request.headers(), &key, &state, "application/json")?;
+    let bytes = to_bytes(request.into_body(), MAX_MAGNET_BODY)
+        .await
+        .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
+    let body: MagnetRequest =
+        serde_json::from_slice(&bytes).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let item = state
+        .client
+        .add_magnet(&body.magnet, body.paused)
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    Ok((StatusCode::CREATED, response_headers(), Json(item)))
+}
+
+async fn add_torrent(
+    State(state): State<UiState>,
+    RoutePath(key): RoutePath<String>,
+    request: Request,
+) -> Result<(StatusCode, HeaderMap, Json<AddView>), StatusCode> {
+    check_mutation(request.headers(), &key, &state, "application/x-bittorrent")?;
+    let bytes = to_bytes(request.into_body(), MAX_TORRENT_BODY)
+        .await
+        .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
+    if bytes.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let item = state
+        .client
+        .add_torrent(&bytes, false)
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    Ok((StatusCode::CREATED, response_headers(), Json(item)))
+}
+
+async fn mutate_torrent(
+    State(state): State<UiState>,
+    RoutePath((key, id, action)): RoutePath<(String, String, String)>,
+    request: Request,
+) -> Result<(HeaderMap, StatusCode), StatusCode> {
+    check_mutation(request.headers(), &key, &state, "application/json")?;
+    let bytes = to_bytes(request.into_body(), 64)
+        .await
+        .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
+    if bytes.as_ref() != b"{}" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let id_uuid = uuid::Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
+    if id_uuid.hyphenated().to_string() != id {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let result = match action.as_str() {
+        "pause" => state.client.pause(&id).await,
+        "resume" => state.client.resume(&id).await,
+        "verify" => state.client.verify(&id).await,
+        "remove" => state.client.remove(&id).await,
+        _ => return Err(StatusCode::NOT_FOUND),
+    };
+    result.map_err(|_| StatusCode::BAD_GATEWAY)?;
+    Ok((response_headers(), StatusCode::NO_CONTENT))
 }

@@ -8,7 +8,7 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 - [x] Transactional SQLite intent, process lock, file identity checks and full piece recheck on service reopen.
 - [x] Experimental v1 `.torrent` and HTTP(S) tracker magnet download through a bounded outbound policy proxy.
 - [x] Authenticated loopback API and protected service discovery; CLI add/list/pause/resume/remove.
-- [x] MCP stdio adapter and ephemeral read-only browser dashboard, subject to CI qualification.
+- [x] MCP stdio adapter and ephemeral browser dashboard with local controls, subject to CI qualification.
 - [x] Explicit piece recheck for `.torrent` records, subject to CI qualification.
 - [x] Bounded persistent download queue and optional global bandwidth caps at service startup, subject to CI qualification.
 
@@ -16,7 +16,7 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 
 - [x] Store validated resolved metainfo for magnets so restart and explicit verification do not depend on a tracker being online, subject to CI qualification.
 - [ ] Complete lifecycle controls: start/stop/status, queueing, concurrency and bandwidth limits, selected files, seeding policy.
-- [ ] Expand browser UI to add, pause, resume and verify through a session handshake with CSRF protection; add keyboard and browser tests.
+- [ ] Finish browser UI qualification: automated keyboard/browser tests, usability review and CSRF regression coverage across supported browsers.
 - [ ] Show measured speed, peers, error states and ETA without inventing values; provide machine-readable API errors.
 - [ ] Qualify DHT, UDP trackers, private torrents and peer discovery under the outbound network policy, or document narrower compatibility.
 - [ ] Test low disk space, locked files, service crash during each mutation, migration interruption and concurrent clients on native Windows.
