@@ -38,6 +38,15 @@ enum Commands {
         #[arg(long)]
         state: std::path::PathBuf,
     },
+    /// Download a v1 magnet with an HTTP(S) tracker using the experimental service.
+    #[cfg(feature = "service-core")]
+    DownloadMagnet {
+        magnet: String,
+        #[arg(long)]
+        output: std::path::PathBuf,
+        #[arg(long)]
+        state: std::path::PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -64,6 +73,12 @@ fn main() -> ExitCode {
             output,
             state,
         } => return download_torrent(path, output, state),
+        #[cfg(feature = "service-core")]
+        Commands::DownloadMagnet {
+            magnet,
+            output,
+            state,
+        } => return run_download(DownloadSource::Magnet(magnet), output, state),
         Commands::InspectMagnet { magnet, json } => {
             let value = match Magnet::parse(&magnet) {
                 Ok(value) => value,
@@ -135,7 +150,6 @@ fn download_torrent(
     output: std::path::PathBuf,
     state: std::path::PathBuf,
 ) -> ExitCode {
-    use torrent_lite::{network_policy::DestinationPolicy, service_core::ServiceCore};
     let file = match File::open(path) {
         Ok(file) => file,
         Err(_) => {
@@ -152,6 +166,22 @@ fn download_torrent(
         eprintln!("error: unable to read torrent file");
         return ExitCode::from(2);
     }
+    run_download(DownloadSource::Torrent(bytes), output, state)
+}
+
+#[cfg(feature = "service-core")]
+enum DownloadSource {
+    Torrent(Vec<u8>),
+    Magnet(String),
+}
+
+#[cfg(feature = "service-core")]
+fn run_download(
+    source: DownloadSource,
+    output: std::path::PathBuf,
+    state: std::path::PathBuf,
+) -> ExitCode {
+    use torrent_lite::{network_policy::DestinationPolicy, service_core::ServiceCore};
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -164,7 +194,10 @@ fn download_torrent(
     };
     let result = runtime.block_on(async {
         let service = ServiceCore::open(&state, &output, DestinationPolicy::PublicOnly).await?;
-        let item = service.add_torrent(&bytes, false).await?;
+        let item = match source {
+            DownloadSource::Torrent(bytes) => service.add_torrent(&bytes, false).await?,
+            DownloadSource::Magnet(magnet) => service.add_magnet(&magnet).await?,
+        };
         let completion = service.wait_completed(&item.id);
         tokio::pin!(completion);
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
