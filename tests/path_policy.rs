@@ -127,3 +127,17 @@ fn aggregate_path_bytes_are_bounded_before_collision_allocation() {
         .collect();
     assert_eq!(validate_file_set(&paths), Err(InputError::TooLarge));
 }
+
+#[test]
+fn casing_generated_normalization_aliases_collide_including_prefixes() {
+    for (left, right) in [("\u{0390}", "\u{03aa}\u{0301}"), ("\u{0130}", "i\u{0307}")] {
+        assert_eq!(
+            validate_file_set(&files(&[&[left], &[right]])),
+            Err(InputError::PathCollision)
+        );
+        assert_eq!(
+            validate_file_set(&files(&[&[left], &[right, "child"]])),
+            Err(InputError::PathCollision)
+        );
+    }
+}

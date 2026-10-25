@@ -33,10 +33,10 @@ Files: Cargo.toml, src/lib.rs, src/magnet.rs, tests/magnet.rs.
 
 Produces `Magnet::parse(&str) -> Result<Magnet, InputError>` with normalized hex `info_hash()` and optional display name; raw tracker queries are not emitted by default.
 
-- [ ] RED: tests for literal 40-digit hexadecimal and equivalent 32-character base32 identity, percent-encoded xt, missing/invalid hash, conflicting/repeated xt, unsupported btmh, wrong scheme and 16 KiB boundary. Assertions use hand-derived identity `000102030405060708090a0b0c0d0e0f10111213` and base32 `AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQT`.
-- [ ] Run `cargo test --test magnet`; verify behavior fails with a minimal unimplemented seam, not a compiler error.
-- [ ] Implement parsing with the URL parser, exact topic validation and bounded input. Reject conflicting identities and v2/hybrid topics explicitly.
-- [ ] Run test and full suite, commit.
+- [x] RED: tests for literal 40-digit hexadecimal and equivalent 32-character base32 identity, percent-encoded xt, missing/invalid hash, conflicting/repeated xt, unsupported btmh, wrong scheme and 16 KiB boundary. Assertions use hand-derived identity `000102030405060708090a0b0c0d0e0f10111213` and base32 `AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQT`.
+- [x] Run `cargo test --test magnet`; verify behavior fails with a minimal unimplemented seam, not a compiler error.
+- [x] Implement parsing with the URL parser, exact topic validation and bounded input. Reject conflicting identities and v2/hybrid topics explicitly.
+- [x] Run test and full suite, commit.
 
 ## Task 2: Portable torrent path policy
 
@@ -44,10 +44,10 @@ Files: src/path_policy.rs, tests/path_policy.rs.
 
 Produces `validate_components(&[&str]) -> Result<(), InputError>` and `validate_file_set(&[Vec<String>]) -> Result<(), InputError>`. Component length max 255 UTF-16 units, depth max 32; conservative case-insensitive normalized collision detection. No filesystem writes in this module.
 
-- [ ] RED: allow ordinary nested Unicode paths; reject empty, dot/dotdot, separators, absolute/drive/UNC, control characters, NTFS ADS, DOS device names (including extensions), trailing dots/spaces, depth/length excess.
-- [ ] RED: duplicate/case/Unicode-normalization collisions, file-vs-directory prefix conflicts and >10,000 entries rejected.
-- [ ] Run `cargo test --test path_policy`; verify assertion failures, implement smallest validation and bounded collision structure.
-- [ ] Run full suite and commit.
+- [x] RED: allow ordinary nested Unicode paths; reject empty, dot/dotdot, separators, absolute/drive/UNC, control characters, NTFS ADS, DOS device names (including extensions), trailing dots/spaces, depth/length excess.
+- [x] RED: duplicate/case/Unicode-normalization collisions, file-vs-directory prefix conflicts and >10,000 entries rejected.
+- [x] Run `cargo test --test path_policy`; verify assertion failures, implement smallest validation and bounded collision structure.
+- [x] Run full suite and commit.
 
 ## Task 3: Offline CLI and public development baseline
 
@@ -55,11 +55,11 @@ Files: src/main.rs, tests/cli.rs, README.md, CONTRIBUTING.md, SECURITY.md, LICEN
 
 Consumes `Magnet::parse`; command `torrent-lite inspect-magnet <MAGNET> [--json]` is explicitly offline and provisional, avoiding conflict with the eventual service `inspect <id>`. JSON schema: `{info_hash, display_name}`; no trackers or original URI. Codes: 0 success, 2 invalid input/usage. Unknown commands fail.
 
-- [ ] RED: launch real binary with valid magnet and inspect parsed JSON; invalid secret-bearing input returns 2, stderr explains category without echoing input; `download` is rejected rather than pretending to work.
-- [ ] Run `cargo test --test cli`, implement command, verify tests.
-- [ ] Add CI for Windows/Linux/macOS, fmt and clippy. Document exact current capability, development commands, security reporting limitations and remaining engine blockers.
-- [ ] Evaluate fixed candidate source/API: record supported and unverified behaviors, version/license/features, required experiments. Do not label source inspection as a successful live transfer test.
-- [ ] Verify `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --locked`, release build and a real invocation. Fresh independent code review, fix material findings with RED/GREEN, publish branch and draft PR.
+- [x] RED: launch real binary with valid magnet and inspect parsed JSON; invalid secret-bearing input returns 2, stderr explains category without echoing input; `download` is rejected rather than pretending to work.
+- [x] Run `cargo test --test cli`, implement command, verify tests.
+- [x] Add CI for Windows/Linux/macOS, fmt and clippy. Document exact current capability, development commands, security reporting limitations and remaining engine blockers.
+- [x] Evaluate fixed candidate source/API: record supported and unverified behaviors, version/license/features, required experiments. Do not label source inspection as a successful live transfer test.
+- [x] Verify `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --locked`, release build and a real invocation. Fresh independent code review, fix material findings with RED/GREEN, publish branch and draft PR.
 
 ## Subsequent plans (not completion claims)
 

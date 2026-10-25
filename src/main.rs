@@ -24,7 +24,22 @@ enum Commands {
 }
 
 fn main() -> ExitCode {
-    let Cli { command } = Cli::parse();
+    let Cli { command } = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error)
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) =>
+        {
+            error.exit()
+        }
+        Err(_) => {
+            // clap diagnostics can include arbitrary arguments, including tracker secrets.
+            eprintln!("error: invalid command arguments; run torrent-lite --help");
+            return ExitCode::from(2);
+        }
+    };
     let Commands::InspectMagnet { magnet, json } = command;
     let value = match Magnet::parse(&magnet) {
         Ok(value) => value,

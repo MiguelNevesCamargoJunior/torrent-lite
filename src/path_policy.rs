@@ -65,7 +65,7 @@ pub fn validate_file_set(files: &[Vec<String>]) -> Result<(), InputError> {
         validate_components(&components.iter().map(String::as_str).collect::<Vec<_>>())?;
         let normalized: Vec<String> = components
             .iter()
-            .map(|s| s.nfc().collect::<String>().to_uppercase())
+            .map(|s| s.nfc().collect::<String>().to_uppercase().nfc().collect())
             .collect();
         paths.push(normalized);
     }
