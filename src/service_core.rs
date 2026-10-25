@@ -18,7 +18,7 @@ use std::{
     num::NonZeroU32,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -30,11 +30,34 @@ pub struct ServiceCore {
     proxy: PolicyProxy,
     policy: DestinationPolicy,
     handles: AsyncMutex<HashMap<String, Arc<ManagedTorrent>>>,
+    failures: AsyncMutex<HashMap<String, ActivationFailure>>,
     mutation: AsyncMutex<()>,
     max_active_downloads: usize,
 }
 
 pub const DEFAULT_MAX_ACTIVE_DOWNLOADS: usize = 3;
+
+#[derive(Debug, Clone, Copy)]
+struct ActivationFailure {
+    attempts: u32,
+    retry_after: Instant,
+}
+
+impl ActivationFailure {
+    fn next(previous: Option<Self>) -> Self {
+        let attempts = previous.map_or(1, |failure| failure.attempts.saturating_add(1));
+        let seconds = 1_u64.checked_shl(attempts.min(6)).unwrap_or(60).min(60);
+        Self {
+            attempts,
+            retry_after: Instant::now() + Duration::from_secs(seconds),
+        }
+    }
+
+    fn retry_after_secs(self) -> u64 {
+        let remaining = self.retry_after.saturating_duration_since(Instant::now());
+        remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0)
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ServiceSettings {
@@ -168,6 +191,7 @@ impl ServiceCore {
             proxy,
             policy,
             handles: AsyncMutex::new(HashMap::new()),
+            failures: AsyncMutex::new(HashMap::new()),
             mutation: AsyncMutex::new(()),
             max_active_downloads: settings.max_active_downloads,
         };
@@ -241,6 +265,14 @@ impl ServiceCore {
         })
     }
 
+    pub async fn activation_failure(&self, id: &str) -> Option<(&'static str, u64)> {
+        self.failures
+            .lock()
+            .await
+            .get(id)
+            .map(|failure| ("activation_failed", failure.retry_after_secs()))
+    }
+
     pub async fn add_torrent(&self, bytes: &[u8], paused: bool) -> anyhow::Result<StoredTorrent> {
         let _guard = self.mutation.lock().await;
         sanitize_torrent_with_policy(bytes, self.policy)?;
@@ -289,6 +321,7 @@ impl ServiceCore {
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .set_intent(id, DesiredState::Running)?;
+        self.failures.lock().await.remove(id);
         self.reconcile_locked().await
     }
 
@@ -298,6 +331,7 @@ impl ServiceCore {
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .set_intent(id, DesiredState::Paused)?;
+        self.failures.lock().await.remove(id);
         if let Some(handle) = self.handles.lock().await.get(id).cloned() {
             self.session.pause(&handle).await?;
         }
@@ -337,6 +371,7 @@ impl ServiceCore {
         let checked_handle = { self.handles.lock().await.get(id).cloned() }
             .ok_or_else(|| anyhow::anyhow!("verification handle unavailable"))?;
         checked_handle.wait_until_initialized().await?;
+        self.failures.lock().await.remove(id);
         self.reconcile_locked().await
     }
 
@@ -346,6 +381,7 @@ impl ServiceCore {
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .remove(id)?;
+        self.failures.lock().await.remove(id);
         if let Some(handle) = self.handles.lock().await.remove(id) {
             // Only resolved .torrent handles enter this map. librqbit 9.0.1's
             // delete path panics if metadata has not been resolved.
@@ -387,6 +423,7 @@ impl ServiceCore {
             }
             let existing = { self.handles.lock().await.get(&item.id).cloned() };
             if let Some(handle) = existing {
+                self.failures.lock().await.remove(&item.id);
                 let stats = handle.stats();
                 if stats.finished {
                     if stats.state.to_string() != "paused" {
@@ -403,11 +440,23 @@ impl ServiceCore {
                     self.session.pause(&handle).await?;
                 }
             } else if active < self.max_active_downloads {
-                match item.source_kind {
-                    SourceKind::Torrent => self.activate_torrent(&item).await?,
-                    SourceKind::Magnet => self.activate_magnet(&item).await?,
+                let previous = self.failures.lock().await.get(&item.id).copied();
+                if previous.is_some_and(|failure| failure.retry_after > Instant::now()) {
+                    continue;
                 }
-                active += 1;
+                let result = match item.source_kind {
+                    SourceKind::Torrent => self.activate_torrent(&item).await,
+                    SourceKind::Magnet => self.activate_magnet(&item).await,
+                };
+                if result.is_ok() {
+                    self.failures.lock().await.remove(&item.id);
+                    active += 1;
+                } else {
+                    self.failures
+                        .lock()
+                        .await
+                        .insert(item.id.clone(), ActivationFailure::next(previous));
+                }
             }
         }
         Ok(())

@@ -343,9 +343,10 @@ fn run_client(action: ClientAction, state: std::path::PathBuf) -> ExitCode {
                         .iter()
                         .map(|row| {
                             format!(
-                                "{}  {}  {}/{} bytes",
+                                "{}  {} / {}  {}/{} bytes",
                                 row.id,
                                 row.desired,
+                                row.observed_state.as_deref().unwrap_or("unknown"),
                                 row.progress_bytes.unwrap_or(0),
                                 row.total_bytes.unwrap_or(0)
                             )

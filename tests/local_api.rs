@@ -99,7 +99,45 @@ async fn add_rejects_unauthorized_body_and_registers_paused_magnet() {
     let listed = request(addr, &format!("{host}{secret}")).await;
     assert!(listed.contains("\"name\":null"));
     assert!(listed.contains("\"observed_state\":null"));
+    assert!(listed.contains("\"error_code\":null"));
+    assert!(listed.contains("\"retry_after_secs\":null"));
     assert!(listed.contains("\"download_bytes_per_sec\":null"));
+    drop(api);
+    service.stop().await;
+}
+
+#[tokio::test]
+async fn activation_failure_has_a_safe_machine_readable_state() {
+    let workspace = tempfile::tempdir().unwrap();
+    let output = workspace.path().join("download");
+    std::fs::create_dir(&output).unwrap();
+    let database = workspace.path().join("state.db");
+    let service = Arc::new(
+        ServiceCore::open(&database, &output, DestinationPolicy::PublicOnly)
+            .await
+            .unwrap(),
+    );
+    let mut metainfo = b"d4:infod6:lengthi4e4:name8:file.txt12:piece lengthi4e6:pieces20:".to_vec();
+    metainfo.extend([0_u8; 20]);
+    metainfo.extend(b"ee");
+    let item = service.add_torrent(&metainfo, true).await.unwrap();
+    let collision = output.join(&item.id);
+    std::fs::write(&collision, b"collision").unwrap();
+    service.resume(&item.id).await.unwrap();
+    let api = LocalApi::bind(service.clone()).await.unwrap();
+    let headers = format!(
+        "Host: {}\r\nAuthorization: Bearer {}\r\n",
+        api.local_addr(),
+        api.token()
+    );
+    let listed = request(api.local_addr(), &headers).await;
+    assert!(listed.contains("\"observed_state\":\"retrying\""));
+    assert!(listed.contains("\"error_code\":\"activation_failed\""));
+    assert!(listed.contains("\"retry_after_secs\":"));
+    assert!(!listed.contains("collision"));
+    service.pause(&item.id).await.unwrap();
+    let paused = request(api.local_addr(), &headers).await;
+    assert!(paused.contains("\"error_code\":null"));
     drop(api);
     service.stop().await;
 }

@@ -130,6 +130,84 @@ async fn queue_limits_active_downloads_and_survives_restart() {
 }
 
 #[tokio::test]
+async fn failed_activation_keeps_its_record_and_does_not_block_the_queue() {
+    let workspace = tempfile::tempdir().unwrap();
+    let source = workspace.path().join("source");
+    let download = workspace.path().join("download");
+    std::fs::create_dir(&source).unwrap();
+    std::fs::create_dir(&download).unwrap();
+    let seeder = Session::new_with_opts(
+        source.clone(),
+        SessionOptions {
+            dht: None,
+            disable_trackers: true,
+            disable_local_service_discovery: true,
+            persistence: None,
+            listen: Some(ListenerOptions {
+                listen_addr: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+                ipv4_only: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let mut sources = Vec::new();
+    for index in 0..2 {
+        let path = source.join(format!("failure-{index}.bin"));
+        std::fs::write(&path, vec![index as u8 + 1; 16 * 1024]).unwrap();
+        let (torrent, _) = seeder
+            .create_and_serve_torrent(
+                &path,
+                CreateTorrentOptions {
+                    piece_length: Some(16 * 1024),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        sources.push(torrent.as_bytes().unwrap());
+    }
+    let service = ServiceCore::open_with_limit(
+        &workspace.path().join("state.db"),
+        &download,
+        DestinationPolicy::AllowLan,
+        1,
+    )
+    .await
+    .unwrap();
+    let broken = service.add_torrent(&sources[0], true).await.unwrap();
+    let collision = download.join(&broken.id);
+    std::fs::write(&collision, b"not a directory").unwrap();
+    service.resume(&broken.id).await.unwrap();
+    let (code, wait) = service.activation_failure(&broken.id).await.unwrap();
+    assert_eq!(code, "activation_failed");
+    assert!(wait <= 2);
+    let healthy = service.add_torrent(&sources[1], false).await.unwrap();
+    assert!(service.metrics(&healthy.id).await.is_some());
+    assert!(service.metrics(&broken.id).await.is_none());
+    service.tick_queue().await.unwrap();
+    assert!(service.activation_failure(&broken.id).await.unwrap().1 <= 2);
+    tokio::time::sleep(Duration::from_millis(2100)).await;
+    service.tick_queue().await.unwrap();
+    let retry = service.activation_failure(&broken.id).await.unwrap().1;
+    assert!((3..=4).contains(&retry));
+    service.pause(&broken.id).await.unwrap();
+    assert!(service.activation_failure(&broken.id).await.is_none());
+    std::fs::remove_file(collision).unwrap();
+    service.resume(&broken.id).await.unwrap();
+    assert!(service.activation_failure(&broken.id).await.is_none());
+    assert!(service.metrics(&broken.id).await.is_some());
+    assert_eq!(
+        service.metrics(&healthy.id).await.unwrap().observed_state,
+        "paused"
+    );
+    service.stop().await;
+    seeder.stop().await;
+}
+
+#[tokio::test]
 async fn completed_download_releases_queue_slot_without_client_mutation() {
     let workspace = tempfile::tempdir().unwrap();
     let source = workspace.path().join("source");

@@ -63,6 +63,8 @@ pub struct TorrentView {
     pub total_bytes: Option<u64>,
     pub finished: Option<bool>,
     pub observed_state: Option<String>,
+    pub error_code: Option<String>,
+    pub retry_after_secs: Option<u64>,
     pub uploaded_bytes: Option<u64>,
     pub download_bytes_per_sec: Option<u64>,
     pub upload_bytes_per_sec: Option<u64>,
@@ -201,6 +203,7 @@ async fn list(
     let mut output = Vec::with_capacity(records.len());
     for item in records {
         let metrics = state.service.metrics(&item.id).await;
+        let failure = state.service.activation_failure(&item.id).await;
         output.push(TorrentView {
             id: item.id,
             info_hash: item.info_hash,
@@ -221,7 +224,10 @@ async fn list(
             observed_state: metrics
                 .as_ref()
                 .map(|value| value.observed_state.clone())
+                .or_else(|| failure.map(|_| "retrying".to_owned()))
                 .or_else(|| (item.desired == DesiredState::Running).then(|| "queued".to_owned())),
+            error_code: failure.map(|(code, _)| code.to_owned()),
+            retry_after_secs: failure.map(|(_, seconds)| seconds),
             uploaded_bytes: metrics.as_ref().map(|value| value.uploaded_bytes),
             download_bytes_per_sec: metrics
                 .as_ref()

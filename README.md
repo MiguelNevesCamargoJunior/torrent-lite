@@ -62,6 +62,8 @@ cargo run --locked --features local-api -- serve --output path/to/downloads --st
 
 Add `--download-limit-kib 512` or `--upload-limit-kib 128` to cap global throughput. Omit either flag for unlimited speed in that direction. Values must be at least 16 KiB/s; see [bandwidth behavior](docs/bandwidth-spec.md). The service queues downloads beyond `--max-active` in registration order. Completed downloads release a slot and are paused; see [queue behavior](docs/queue-spec.md).
 
+If a torrent cannot activate, its record stays visible as `retrying` with a bounded retry delay. Other queued torrents can still start. The API exposes a generic error code and the delay without revealing tracker URLs or local paths.
+
 The local API returns stable JSON error codes for failed requests; see the [error contract](docs/error-contract.md). Errors do not echo supplied magnets, file paths or authorization tokens.
 
 It listens only on `127.0.0.1`, publishes a protected endpoint record beside the state database, and stops on Ctrl+C. In another terminal, use the same state database path:
