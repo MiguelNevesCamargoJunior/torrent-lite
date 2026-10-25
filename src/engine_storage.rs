@@ -206,6 +206,11 @@ impl TorrentStorage for DurableStorage {
 
     fn pwrite_all(&self, file_id: usize, offset: u64, buf: &[u8]) -> anyhow::Result<()> {
         self.check_range(file_id, offset, buf.len())?;
+        // The engine can issue an empty write at an exact file boundary.
+        // It must not turn an unselected file into a real one.
+        if buf.is_empty() {
+            return Ok(());
+        }
         let mut file = self
             .file(file_id)?
             .lock()
