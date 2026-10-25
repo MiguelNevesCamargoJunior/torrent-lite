@@ -86,3 +86,26 @@ fn reads_multifile_paths_and_private_flag() {
     assert_eq!(value.files[1].path, ["dir", "b.txt"]);
     assert!(value.private);
 }
+
+#[test]
+fn file_lengths_that_overflow_are_rejected_without_panic() {
+    let mut info = b"d5:filesld6:lengthi18446744073709551615e4:pathl5:a.txteed6:lengthi2e4:pathl5:b.txteee4:name4:root12:piece lengthi4e6:pieces20:".to_vec();
+    info.extend([0_u8; 20]);
+    info.push(b'e');
+    let result = std::panic::catch_unwind(|| inspect_torrent(&metainfo(&info)));
+    assert_eq!(result.unwrap(), Err(InputError::InvalidTorrent));
+}
+
+#[test]
+fn multiple_legal_integer_lengths_cannot_overflow_the_total() {
+    let mut info = b"d5:filesld6:lengthi9223372036854775807e4:pathl5:a.txteed6:lengthi9223372036854775807e4:pathl5:b.txteed6:lengthi2e4:pathl5:c.txteee4:name4:root12:piece lengthi4e6:pieces20:".to_vec();
+    info.extend([0_u8; 20]);
+    info.push(b'e');
+    assert_eq!(inspect_torrent(&metainfo(&info)), Err(InputError::TooLarge));
+}
+
+#[test]
+fn preflight_ignores_integer_markers_inside_a_byte_string() {
+    let value = inspect_torrent(&single(b"ievil.txt", b"")).unwrap();
+    assert_eq!(value.files[0].path, ["ievil.txt"]);
+}
