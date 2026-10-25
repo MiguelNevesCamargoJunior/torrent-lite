@@ -520,7 +520,11 @@ fn run_download(
         let service = ServiceCore::open(&state, &output, DestinationPolicy::PublicOnly).await?;
         let item = match source {
             DownloadSource::Torrent(bytes) => service.add_torrent(&bytes, false).await?,
-            DownloadSource::Magnet(magnet) => service.add_magnet(&magnet).await?,
+            DownloadSource::Magnet(magnet) => {
+                let item = service.add_magnet(&magnet).await?;
+                service.tick_queue().await?;
+                item
+            }
         };
         let completion = service.wait_completed(&item.id);
         tokio::pin!(completion);
