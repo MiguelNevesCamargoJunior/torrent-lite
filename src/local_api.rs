@@ -6,12 +6,14 @@ use crate::{
 };
 use axum::{
     Json, Router,
-    body::to_bytes,
+    body::{Body, to_bytes},
     extract::{Path, Request, State},
     http::{
-        HeaderMap, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE, HOST, ORIGIN},
+        HeaderMap, HeaderValue, StatusCode,
+        header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HOST, ORIGIN},
     },
+    middleware::{Next, from_fn},
+    response::Response,
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
@@ -97,6 +99,8 @@ impl LocalApi {
             .route("/api/v1/torrents/{id}/pause", post(pause))
             .route("/api/v1/torrents/{id}/resume", post(resume))
             .route("/api/v1/torrents/{id}/verify", post(verify))
+            .fallback(|| async { StatusCode::NOT_FOUND })
+            .layer(from_fn(json_errors))
             .with_state(state);
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
@@ -112,6 +116,40 @@ impl LocalApi {
     pub fn token(&self) -> &str {
         &self.token
     }
+}
+
+async fn json_errors(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let status = response.status();
+    if status.is_success() {
+        return response;
+    }
+    let code = match status {
+        StatusCode::BAD_REQUEST => "bad_request",
+        StatusCode::UNAUTHORIZED => "unauthorized",
+        StatusCode::FORBIDDEN => "forbidden",
+        StatusCode::NOT_FOUND => "not_found",
+        StatusCode::METHOD_NOT_ALLOWED => "method_not_allowed",
+        StatusCode::REQUEST_TIMEOUT => "request_timeout",
+        StatusCode::PAYLOAD_TOO_LARGE => "payload_too_large",
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => "unsupported_media_type",
+        StatusCode::UNPROCESSABLE_ENTITY => "unprocessable",
+        StatusCode::TOO_MANY_REQUESTS => "busy",
+        _ => "internal_error",
+    };
+    *response.body_mut() = Body::from(format!("{{\"error\":{{\"code\":\"{code}\"}}}}"));
+    response.headers_mut().remove(CONTENT_LENGTH);
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response
 }
 
 impl Drop for LocalApi {

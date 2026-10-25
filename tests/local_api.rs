@@ -64,8 +64,24 @@ async fn add_rejects_unauthorized_body_and_registers_paused_magnet() {
     let body = r#"{"magnet":"magnet:?xt=urn:btih:0000000000000000000000000000000000000001&tr=https://tracker.example/announce","paused":true}"#;
     let denied = request_body(addr, "POST", "/api/v1/torrents", &host, body).await;
     assert!(denied.starts_with("HTTP/1.1 401"));
+    assert!(denied.contains("\"code\":\"unauthorized\""));
+    assert!(!denied.contains("magnet:?"));
     assert!(service.list().unwrap().is_empty());
     let secret = format!("Authorization: Bearer {}\r\n", api.token());
+    let missing_route =
+        request_target(addr, "GET", "/api/v1/missing", &format!("{host}{secret}")).await;
+    assert!(missing_route.starts_with("HTTP/1.1 404"));
+    assert!(missing_route.contains("\"code\":\"not_found\""));
+    let malformed = request_body(
+        addr,
+        "POST",
+        "/api/v1/torrents",
+        &format!("{host}{secret}"),
+        "{",
+    )
+    .await;
+    assert!(malformed.starts_with("HTTP/1.1 400"));
+    assert!(malformed.contains("\"code\":\"bad_request\""));
     let allowed = request_body(
         addr,
         "POST",
@@ -129,6 +145,16 @@ async fn removal_requires_authorization_and_preserves_downloaded_files() {
         .await
         .starts_with("HTTP/1.1 403")
     );
+    assert!(
+        request_target(
+            addr,
+            "POST",
+            &path,
+            &format!("{host}{secret}Origin: http://evil.invalid\r\n")
+        )
+        .await
+        .contains("\"code\":\"forbidden\"")
+    );
     assert_eq!(service.list().unwrap().len(), 1);
     let pause_path = format!("/api/v1/torrents/{}/pause", item.id);
     assert!(
@@ -141,11 +167,9 @@ async fn removal_requires_authorization_and_preserves_downloaded_files() {
         torrent_lite::state_store::DesiredState::Paused
     );
     let verify_path = format!("/api/v1/torrents/{}/verify", item.id);
-    assert!(
-        request_target(addr, "POST", &verify_path, &format!("{host}{secret}"))
-            .await
-            .starts_with("HTTP/1.1 422")
-    );
+    let unverified = request_target(addr, "POST", &verify_path, &format!("{host}{secret}")).await;
+    assert!(unverified.starts_with("HTTP/1.1 422"));
+    assert!(unverified.contains("\"code\":\"unprocessable\""));
     assert!(
         request_target(addr, "POST", &path, &format!("{host}{secret}"))
             .await
