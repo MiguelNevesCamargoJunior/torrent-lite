@@ -240,6 +240,8 @@ impl StateStore {
                 transaction.execute_batch(&format!(
                     "{CREATE_FILE_SELECTION_SQL}; PRAGMA user_version = {SCHEMA_VERSION};"
                 ))?;
+                #[cfg(test)]
+                crash_before_commit("migration_commit");
                 transaction.commit()?;
             }
             if !matches_schema(&connection, "file_identities", CREATE_FILE_IDENTITIES_SQL)? {
