@@ -6,10 +6,7 @@ use torrent_lite::magnet::Magnet;
 use torrent_lite::torrent_file::inspect_torrent;
 
 #[derive(Parser)]
-#[command(
-    version,
-    about = "Offline torrent input inspection (development preview)"
-)]
+#[command(version, about = "Experimental local-first BitTorrent client")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -17,6 +14,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Run the local download service and authenticated API in the foreground.
+    #[cfg(feature = "local-api")]
+    Serve {
+        #[arg(long)]
+        output: std::path::PathBuf,
+        #[arg(long)]
+        state: std::path::PathBuf,
+    },
     /// Inspect a v1 magnet locally. Does not connect to peers or download data.
     InspectMagnet {
         magnet: String,
@@ -67,6 +72,8 @@ fn main() -> ExitCode {
         }
     };
     let output = match command {
+        #[cfg(feature = "local-api")]
+        Commands::Serve { output, state } => return run_serve(output, state),
         #[cfg(feature = "service-core")]
         Commands::DownloadTorrent {
             path,
@@ -141,6 +148,49 @@ fn main() -> ExitCode {
             eprintln!("error: unable to write output");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(feature = "local-api")]
+fn run_serve(output: std::path::PathBuf, state: std::path::PathBuf) -> ExitCode {
+    use std::sync::Arc;
+    use torrent_lite::{
+        local_api::LocalApi, network_policy::DestinationPolicy, service_core::ServiceCore,
+        service_discovery::EndpointLease,
+    };
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => {
+            eprintln!("error: unable to start runtime");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = runtime.block_on(async {
+        let service =
+            Arc::new(ServiceCore::open(&state, &output, DestinationPolicy::PublicOnly).await?);
+        let api = LocalApi::bind(service.clone()).await?;
+        let lease = match EndpointLease::publish(&state, &api) {
+            Ok(lease) => lease,
+            Err(error) => {
+                service.stop().await;
+                return Err(anyhow::Error::from(error));
+            }
+        };
+        println!("Service listening on http://{}", api.local_addr());
+        let signal = tokio::signal::ctrl_c().await;
+        drop(lease);
+        drop(api);
+        service.stop().await;
+        signal.map_err(anyhow::Error::from)
+    });
+    if result.is_err() {
+        eprintln!("error: service failed; verify the state and download directories");
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 

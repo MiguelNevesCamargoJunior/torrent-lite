@@ -8,7 +8,7 @@ The approved design targets one download service with a CLI, a local browser UI 
 
 ## Development status
 
-The current foundation establishes input validation, an offline inspection CLI and a qualified `librqbit` engine. A capability-scoped helper opens files inside a chosen root. A feature-gated SQLite store persists torrent intent, tombstones and file identities; it can migrate its v1 schema after creating a backup. An experimental foreground service uses those identities, rechecks pieces on restart, and routes outbound TCP through a local authenticated policy proxy. Experimental CLI commands download local `.torrent` files and v1 magnets with HTTP(S) trackers. An MCP server and a web UI are subsequent milestones.
+The current foundation establishes input validation, an offline inspection CLI and a qualified `librqbit` engine. A capability-scoped helper opens files inside a chosen root. A feature-gated SQLite store persists torrent intent, tombstones and file identities; it can migrate its v1 schema after creating a backup. An experimental foreground service uses those identities, rechecks pieces on restart, and routes outbound TCP through a local authenticated policy proxy. Experimental CLI commands download local `.torrent` files and v1 magnets with HTTP(S) trackers. A loopback-only API and owner-scoped endpoint discovery are under qualification; an MCP server and web UI are subsequent milestones.
 
 - [Design](docs/superpowers/specs/2026-10-25-torrent-design.md) (Portuguese)
 - [Initial implementation plan](docs/superpowers/plans/2026-10-25-foundation.md)
@@ -52,6 +52,14 @@ cargo run --locked --features service-core -- download-magnet "magnet:?xt=urn:bt
 ```
 
 Files for each torrent are placed under a directory named by the service ID inside the output root. Only HTTP(S) trackers and proxied TCP peers are supported at this stage; DHT, UDP trackers and local discovery are disabled.
+
+The experimental foreground service can also be started separately with:
+
+```sh
+cargo run --locked --features local-api -- serve --output path/to/downloads --state path/to/state.db
+```
+
+It listens only on `127.0.0.1`, publishes a protected endpoint record beside the state database, and stops on Ctrl+C. CLI commands that control this running service, MCP and the browser UI are still in development.
 
 ## License
 

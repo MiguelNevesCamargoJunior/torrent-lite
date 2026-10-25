@@ -6,6 +6,6 @@ O processo que já possui o lock de `state.db` inicia a API em `127.0.0.1:0`, ge
 
 Os clientes validam versão e porta, recuperam o token sob a proteção do SO e usam `Authorization: Bearer` em pedidos ao Host exato `127.0.0.1:<porta>`. Nunca enviam o token em query string, logs, argumentos ou HTML. O arquivo de descoberta é removido no shutdown normal somente se a geração ainda coincidir. Após queda abrupta, a próxima instância sobrescreve o endpoint obsoleto; clientes tratam conexão recusada como serviço indisponível.
 
-Testes: publicar/ler token e porta; rejeitar arquivo grande, versão inválida, porta fora do loopback, token adulterado e permissões Unix abertas; verificar que o token não aparece em texto claro no disco Windows. O teste de processo deve validar reconexão após encerramento forçado. A descoberta não substitui os testes de autorização, Host e Origin da API.
+Testes: publicar/ler token e porta; rejeitar arquivo grande, versão inválida, porta fora do loopback, token adulterado e permissões Unix abertas; verificar que o token não aparece em texto claro no disco Windows. Um teste de processo inicia `serve`, encerra-o à força e exige nova credencial funcional após o reinício. A descoberta não substitui os testes de autorização, Host e Origin da API.
 
 Referências Windows: [CryptProtectData](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata) e [CryptUnprotectData](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptunprotectdata).

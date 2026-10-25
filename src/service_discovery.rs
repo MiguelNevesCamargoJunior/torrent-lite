@@ -69,10 +69,13 @@ impl EndpointLease {
             options.mode(0o600);
         }
         let mut file = options.open(&temporary)?;
+        let write_result = file.write_all(&bytes).and_then(|()| file.sync_all());
+        drop(file);
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
         if let Err(error) = (|| -> io::Result<()> {
-            file.write_all(&bytes)?;
-            file.sync_all()?;
-            drop(file);
             #[cfg(windows)]
             if path.symlink_metadata().is_ok() {
                 fs::remove_file(&path)?;
