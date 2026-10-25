@@ -1,4 +1,4 @@
-//! Loopback-only, bearer-authenticated read API. The token stays in process memory.
+//! Loopback-only, bearer-authenticated API. The token stays in process memory.
 
 use crate::{
     service_core::ServiceCore,
@@ -6,12 +6,12 @@ use crate::{
 };
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Path, State},
     http::{
         HeaderMap, StatusCode,
         header::{AUTHORIZATION, HOST, ORIGIN},
     },
-    routing::get,
+    routing::{get, post},
 };
 use serde::Serialize;
 use std::{
@@ -64,6 +64,7 @@ impl LocalApi {
         };
         let router = Router::new()
             .route("/api/v1/torrents", get(list))
+            .route("/api/v1/torrents/{id}/remove", post(remove))
             .with_state(state);
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
@@ -147,4 +148,34 @@ async fn list(
         });
     }
     Ok(Json(output))
+}
+
+async fn remove(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    authorize(&headers, &state)?;
+    if id.len() != 36
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
+    {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let exists = state
+        .service
+        .list()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .iter()
+        .any(|item| item.id == id);
+    if !exists {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    state
+        .service
+        .remove(&id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
 }
