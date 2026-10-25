@@ -63,6 +63,13 @@ fn valid_file_selection(indices: &[usize], file_count: usize) -> bool {
         && indices.windows(2).all(|pair| pair[0] < pair[1])
 }
 
+#[cfg(test)]
+fn crash_before_commit(point: &str) {
+    if std::env::var("TORRENT_LITE_CRASH_CASE").as_deref() == Ok(point) {
+        std::process::exit(86);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesiredState {
     Running,
@@ -341,6 +348,8 @@ impl StateStore {
             "INSERT INTO torrents(id,info_hash,source_kind,source,destination_root,desired) VALUES (?1,?2,?3,?4,?5,?6)",
             params![id, info_hash, kind.as_str(), source, destination, desired.as_str()],
         )?;
+        #[cfg(test)]
+        crash_before_commit("register");
         transaction.commit()?;
         Ok(StoredTorrent {
             id,
@@ -362,6 +371,8 @@ impl StateStore {
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
+        #[cfg(test)]
+        crash_before_commit("set_intent");
         transaction.commit()?;
         Ok(())
     }
@@ -377,6 +388,8 @@ impl StateStore {
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
+        #[cfg(test)]
+        crash_before_commit("remove");
         transaction.commit()?;
         Ok(())
     }
@@ -644,6 +657,8 @@ impl StateStore {
             "INSERT INTO file_identities(torrent_id,file_index,path_json,length,identity) VALUES (?1,?2,?3,?4,?5)",
             params![torrent_id, file_index, path_json, length as i64, encoded.as_slice()],
         )?;
+        #[cfg(test)]
+        crash_before_commit("file_identity");
         transaction.commit()?;
         Ok(())
     }
