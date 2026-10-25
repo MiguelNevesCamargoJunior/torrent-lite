@@ -9,8 +9,9 @@ use crate::{
     state_store::{AddInput, DesiredState, SourceKind, StateStore, StoredTorrent},
 };
 use librqbit::{
-    AddTorrent, AddTorrentOptions, ConnectionOptions, ListenerOptions, ManagedTorrent, Session,
-    SessionOptions, api::TorrentIdOrHash, limits::LimitsConfig, storage::StorageFactoryExt,
+    AddTorrent, AddTorrentOptions, AddTorrentResponse, ConnectionOptions, ListenerOptions,
+    ManagedTorrent, Session, SessionOptions, api::TorrentIdOrHash, limits::LimitsConfig,
+    storage::StorageFactoryExt,
 };
 use std::{
     collections::HashMap,
@@ -21,6 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::task::JoinHandle;
 
 pub struct ServiceCore {
     state: Arc<Mutex<StateStore>>,
@@ -30,6 +32,7 @@ pub struct ServiceCore {
     proxy: PolicyProxy,
     policy: DestinationPolicy,
     handles: AsyncMutex<HashMap<String, Arc<ManagedTorrent>>>,
+    pending_magnets: AsyncMutex<HashMap<String, JoinHandle<anyhow::Result<Vec<u8>>>>>,
     failures: AsyncMutex<HashMap<String, ActivationFailure>>,
     mutation: AsyncMutex<()>,
     max_active_downloads: usize,
@@ -191,6 +194,7 @@ impl ServiceCore {
             proxy,
             policy,
             handles: AsyncMutex::new(HashMap::new()),
+            pending_magnets: AsyncMutex::new(HashMap::new()),
             failures: AsyncMutex::new(HashMap::new()),
             mutation: AsyncMutex::new(()),
             max_active_downloads: settings.max_active_downloads,
@@ -332,6 +336,7 @@ impl ServiceCore {
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .set_intent(id, DesiredState::Paused)?;
         self.failures.lock().await.remove(id);
+        self.cancel_pending_magnet(id).await;
         if let Some(handle) = self.handles.lock().await.get(id).cloned() {
             self.session.pause(&handle).await?;
         }
@@ -366,7 +371,7 @@ impl ServiceCore {
                 .await?;
             self.handles.lock().await.remove(id);
         }
-        self.activate_source(&item, AddTorrent::from_bytes(bytes), None, true)
+        self.activate_source(&item, AddTorrent::from_bytes(bytes), true)
             .await?;
         let checked_handle = { self.handles.lock().await.get(id).cloned() }
             .ok_or_else(|| anyhow::anyhow!("verification handle unavailable"))?;
@@ -382,6 +387,7 @@ impl ServiceCore {
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .remove(id)?;
         self.failures.lock().await.remove(id);
+        self.cancel_pending_magnet(id).await;
         if let Some(handle) = self.handles.lock().await.remove(id) {
             // Only resolved .torrent handles enter this map. librqbit 9.0.1's
             // delete path panics if metadata has not been resolved.
@@ -393,18 +399,31 @@ impl ServiceCore {
     }
 
     pub async fn wait_completed(&self, id: &str) -> anyhow::Result<()> {
-        let handle = self
-            .handles
-            .lock()
-            .await
-            .get(id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("torrent is not active"))?;
-        handle.wait_until_completed().await?;
-        Ok(())
+        loop {
+            if let Some(handle) = self.handles.lock().await.get(id).cloned() {
+                handle.wait_until_completed().await?;
+                return Ok(());
+            }
+            let item = self
+                .list()?
+                .into_iter()
+                .find(|item| item.id == id)
+                .ok_or_else(|| anyhow::anyhow!("torrent not found"))?;
+            anyhow::ensure!(item.desired == DesiredState::Running, "torrent is paused");
+            anyhow::ensure!(
+                self.activation_failure(id).await.is_none(),
+                "torrent activation failed; retry later"
+            );
+            self.tick_queue().await?;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
     }
 
     pub async fn stop(&self) {
+        let _guard = self.mutation.lock().await;
+        for (_, task) in self.pending_magnets.lock().await.drain() {
+            task.abort();
+        }
         self.session.stop().await;
     }
 
@@ -439,7 +458,37 @@ impl ServiceCore {
                 } else if stats.state.to_string() != "paused" {
                     self.session.pause(&handle).await?;
                 }
-            } else if active < self.max_active_downloads {
+            } else {
+                let pending = {
+                    let mut pending = self.pending_magnets.lock().await;
+                    if active >= self.max_active_downloads {
+                        if let Some(task) = pending.remove(&item.id) {
+                            task.abort();
+                        }
+                        None
+                    } else if pending.get(&item.id).is_some_and(JoinHandle::is_finished) {
+                        pending.remove(&item.id)
+                    } else if pending.contains_key(&item.id) {
+                        active += 1;
+                        continue;
+                    } else {
+                        None
+                    }
+                };
+                if active >= self.max_active_downloads {
+                    continue;
+                }
+                if let Some(task) = pending {
+                    let result = match task.await {
+                        Ok(Ok(bytes)) => self.activate_resolved_magnet(&item, bytes).await,
+                        _ => Err(anyhow::anyhow!("magnet metadata resolution failed")),
+                    };
+                    self.record_activation(&item.id, result.is_ok()).await;
+                    if result.is_ok() {
+                        active += 1;
+                    }
+                    continue;
+                }
                 if item.source_kind == SourceKind::Magnet && !resolve_uncached_magnets {
                     let cached = self
                         .state
@@ -454,22 +503,96 @@ impl ServiceCore {
                 if previous.is_some_and(|failure| failure.retry_after > Instant::now()) {
                     continue;
                 }
+                if item.source_kind == SourceKind::Magnet {
+                    let cached = self
+                        .state
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+                        .load_resolved_metainfo(&item.id)?;
+                    if cached.is_none() {
+                        let result = self.start_magnet_resolution(&item).await;
+                        self.record_activation(&item.id, result.is_ok()).await;
+                        if result.is_ok() {
+                            active += 1;
+                        }
+                        continue;
+                    }
+                }
                 let result = match item.source_kind {
                     SourceKind::Torrent => self.activate_torrent(&item).await,
                     SourceKind::Magnet => self.activate_magnet(&item).await,
                 };
+                self.record_activation(&item.id, result.is_ok()).await;
                 if result.is_ok() {
-                    self.failures.lock().await.remove(&item.id);
                     active += 1;
-                } else {
-                    self.failures
-                        .lock()
-                        .await
-                        .insert(item.id.clone(), ActivationFailure::next(previous));
                 }
             }
         }
         Ok(())
+    }
+
+    async fn record_activation(&self, id: &str, succeeded: bool) {
+        let mut failures = self.failures.lock().await;
+        if succeeded {
+            failures.remove(id);
+        } else {
+            let previous = failures.get(id).copied();
+            failures.insert(id.to_owned(), ActivationFailure::next(previous));
+        }
+    }
+
+    async fn cancel_pending_magnet(&self, id: &str) {
+        if let Some(task) = self.pending_magnets.lock().await.remove(id) {
+            task.abort();
+        }
+    }
+
+    async fn start_magnet_resolution(&self, item: &StoredTorrent) -> anyhow::Result<()> {
+        let source = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .load_source(&item.id)?;
+        let magnet = std::str::from_utf8(&source)?;
+        let uri = sanitize_magnet_with_policy(magnet, self.policy)?.uri;
+        let session = self.session.clone();
+        let task = tokio::spawn(async move {
+            // librqbit resolves metadata before registering a torrent in list_only
+            // mode, so cancellation cannot leave a partial download handle behind.
+            let response = tokio::time::timeout(
+                Duration::from_secs(30),
+                session.add_torrent(
+                    AddTorrent::from_url(uri),
+                    Some(AddTorrentOptions {
+                        list_only: true,
+                        ..Default::default()
+                    }),
+                ),
+            )
+            .await??;
+            match response {
+                AddTorrentResponse::ListOnly(result) => Ok(result.torrent_bytes.to_vec()),
+                _ => Err(anyhow::anyhow!("engine did not return magnet metadata")),
+            }
+        });
+        self.pending_magnets
+            .lock()
+            .await
+            .insert(item.id.clone(), task);
+        Ok(())
+    }
+
+    async fn activate_resolved_magnet(
+        &self,
+        item: &StoredTorrent,
+        metainfo: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        let bytes = sanitize_torrent_with_policy(&metainfo, self.policy)?.bytes;
+        self.state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .store_resolved_metainfo(&item.id, &bytes)?;
+        self.activate_bytes(item, bytes).await
     }
 
     async fn activate_torrent(&self, item: &StoredTorrent) -> anyhow::Result<()> {
@@ -483,33 +606,18 @@ impl ServiceCore {
     }
 
     async fn activate_magnet(&self, item: &StoredTorrent) -> anyhow::Result<()> {
-        let cached = self
+        let bytes = self
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
-            .load_resolved_metainfo(&item.id)?;
-        if let Some(bytes) = cached {
-            let bytes = sanitize_torrent_with_policy(&bytes, self.policy)?.bytes;
-            return self.activate_bytes(item, bytes).await;
-        }
-        let source = self
-            .state
-            .lock()
-            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
-            .load_source(&item.id)?;
-        let magnet = std::str::from_utf8(&source)?;
-        let uri = sanitize_magnet_with_policy(magnet, self.policy)?.uri;
-        self.activate_source(
-            item,
-            AddTorrent::from_url(uri),
-            Some(Duration::from_secs(30)),
-            false,
-        )
-        .await
+            .load_resolved_metainfo(&item.id)?
+            .ok_or_else(|| anyhow::anyhow!("magnet metadata has not resolved"))?;
+        let bytes = sanitize_torrent_with_policy(&bytes, self.policy)?.bytes;
+        self.activate_bytes(item, bytes).await
     }
 
     async fn activate_bytes(&self, item: &StoredTorrent, bytes: Vec<u8>) -> anyhow::Result<()> {
-        self.activate_source(item, AddTorrent::from_bytes(bytes), None, false)
+        self.activate_source(item, AddTorrent::from_bytes(bytes), false)
             .await
     }
 
@@ -517,7 +625,6 @@ impl ServiceCore {
         &self,
         item: &StoredTorrent,
         source: AddTorrent<'_>,
-        deadline: Option<Duration>,
         start_paused: bool,
     ) -> anyhow::Result<()> {
         if self.handles.lock().await.contains_key(&item.id) {
@@ -537,10 +644,7 @@ impl ServiceCore {
                 ..Default::default()
             }),
         );
-        let result = match deadline {
-            Some(deadline) => tokio::time::timeout(deadline, pending).await??,
-            None => pending.await?,
-        };
+        let result = pending.await?;
         let handle = result
             .into_handle()
             .ok_or_else(|| anyhow::anyhow!("engine did not return a torrent handle"))?;

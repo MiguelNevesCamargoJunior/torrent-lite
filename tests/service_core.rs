@@ -89,6 +89,56 @@ async fn unresolved_magnet_does_not_delay_startup_or_local_additions() {
 }
 
 #[tokio::test]
+async fn pending_magnet_releases_its_slot_and_cannot_reactivate_after_removal() {
+    let workspace = tempfile::tempdir().unwrap();
+    let download = workspace.path().join("download");
+    std::fs::create_dir(&download).unwrap();
+    let database = workspace.path().join("state.db");
+    let silent_tracker = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let tracker_url = format!("http://{}/announce", silent_tracker.local_addr().unwrap());
+    let magnet =
+        format!("magnet:?xt=urn:btih:0000000000000000000000000000000000000001&tr={tracker_url}");
+    let service =
+        ServiceCore::open_with_limit(&database, &download, DestinationPolicy::AllowLan, 1)
+            .await
+            .unwrap();
+    let pending = service.add_magnet(&magnet).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), service.tick_queue())
+        .await
+        .expect("metadata resolution held the queue lock")
+        .unwrap();
+    assert!(service.metrics(&pending.id).await.is_none());
+
+    let mut metainfo = b"d4:infod6:lengthi4e4:name8:file.txt12:piece lengthi4e6:pieces20:".to_vec();
+    metainfo.extend([0_u8; 20]);
+    metainfo.extend(b"ee");
+    let local = tokio::time::timeout(
+        Duration::from_secs(2),
+        service.add_torrent(&metainfo, false),
+    )
+    .await
+    .expect("pending metadata blocked a local addition")
+    .unwrap();
+    assert!(service.metrics(&local.id).await.is_none());
+    tokio::time::timeout(Duration::from_secs(2), service.pause(&pending.id))
+        .await
+        .expect("pending metadata blocked pause")
+        .unwrap();
+    assert!(service.metrics(&local.id).await.is_some());
+    service.remove(&pending.id).await.unwrap();
+    service.tick_queue().await.unwrap();
+    assert!(
+        service
+            .list()
+            .unwrap()
+            .iter()
+            .all(|item| item.id != pending.id)
+    );
+    assert!(!download.join(&pending.id).exists());
+    service.stop().await;
+}
+
+#[tokio::test]
 async fn queue_limits_active_downloads_and_survives_restart() {
     let workspace = tempfile::tempdir().unwrap();
     let source = workspace.path().join("source");
