@@ -113,6 +113,27 @@ impl SafeRoot {
         })
     }
 
+    /// Create or reopen one child directory without resolving a new ambient path.
+    pub fn subdir(&self, name: &str) -> io::Result<Self> {
+        validate_components(&[name])
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        match self.dir.create_dir(name) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+        let metadata = self.dir.symlink_metadata(name)?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "directory link is not allowed",
+            ));
+        }
+        Ok(Self {
+            dir: self.dir.open_dir(name)?,
+        })
+    }
+
     /// Create a file only if it does not already exist, including if a link occupies its name.
     pub fn create_new(&self, components: &[&str]) -> io::Result<File> {
         validate_components(components)

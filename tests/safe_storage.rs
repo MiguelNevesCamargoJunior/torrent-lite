@@ -2,6 +2,26 @@ use std::io::{Read, Write};
 use torrent_lite::safe_storage::{FileIdentity, SafeRoot};
 
 #[test]
+fn torrent_subdirectory_is_created_and_reopened_relative_to_root() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = SafeRoot::open(workspace.path()).unwrap();
+    let first = root.subdir("torrent-1").unwrap();
+    first.create_new(&["payload.bin"]).unwrap();
+    let reopened = root.subdir("torrent-1").unwrap();
+    assert!(reopened.create_new(&["other.bin"]).is_ok());
+    assert!(
+        workspace
+            .path()
+            .join("torrent-1")
+            .join("payload.bin")
+            .exists()
+    );
+    assert!(root.subdir("..").is_err());
+    std::fs::write(workspace.path().join("occupied"), b"x").unwrap();
+    assert!(root.subdir("occupied").is_err());
+}
+
+#[test]
 fn creates_nested_file_inside_open_root() {
     let sandbox = tempfile::tempdir().unwrap();
     let root_path = sandbox.path().join("root");
