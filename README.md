@@ -28,7 +28,13 @@ Requires Rust 1.91.1 or later. This command parses a synthetic magnet and makes 
 cargo run --locked -- inspect-magnet "magnet:?xt=urn:btih:000102030405060708090a0b0c0d0e0f10111213&dn=Example" --json
 ```
 
-The library also validates portable path components and rejects file/directory collisions. These are lexical checks, not filesystem confinement. `.torrent` inspection and actual downloads are not available yet.
+Inspect a local v1 metainfo file without starting a download:
+
+```sh
+cargo run --locked -- inspect-torrent path/to/file.torrent --json
+```
+
+The library validates portable path components and rejects file/directory collisions. These are lexical checks, not filesystem confinement. Actual downloads are not available yet.
 
 ## License
 

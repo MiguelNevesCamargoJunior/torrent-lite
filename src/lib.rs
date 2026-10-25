@@ -2,6 +2,7 @@
 
 pub mod magnet;
 pub mod path_policy;
+pub mod torrent_file;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum InputError {
@@ -19,4 +20,6 @@ pub enum InputError {
     UnsafePath,
     #[error("file paths collide")]
     PathCollision,
+    #[error("invalid torrent metadata")]
+    InvalidTorrent,
 }

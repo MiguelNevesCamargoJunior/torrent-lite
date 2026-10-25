@@ -28,3 +28,9 @@ Ruling: no production engine dependency yet. Source inspection found qualificati
 - Initial branch CI passed on Windows, Linux and macOS (runs 40201983977 and 40201941471); final correction commit will receive fresh CI.
 - Initial optimized build failed only at a sandbox temporary archive rename (access denied). Repeating outside the sandbox succeeded; no compiler source change was needed.
 - Corrected source: optimized build succeeded again; real release executable returned the expected JSON identity for the synthetic magnet. Formatting and diff whitespace checks passed.
+
+## Trunk development after PR #1
+
+- User requested direct commits on main. GitHub main already contained merge commit 225f90a for PR #1; local main fast-forwarded to it without overwriting remote work.
+- Added `librqbit-core = 9.0.1` only for bounded, offline v1 metainfo parsing. Three tests first failed against a rejecting seam, then passed for known infohash, unsafe Windows name, symlink attribute and 8 MiB bound.
+- Added `inspect-torrent` CLI with bounded read and sanitized errors. Process test for synthetic .torrent first failed because command was absent, then passed.
