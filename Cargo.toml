@@ -12,6 +12,7 @@ publish = false
 engine-qualification = ["dep:anyhow", "dep:librqbit", "dep:tokio"]
 state-store = ["dep:rusqlite", "dep:uuid"]
 durable-engine = ["engine-qualification", "state-store"]
+policy-proxy = ["dep:tokio", "dep:getrandom", "tokio/net", "tokio/io-util", "tokio/sync"]
 
 [dependencies]
 anyhow = { version = "1.0", optional = true }
@@ -30,6 +31,7 @@ unicode-normalization = "0.1"
 url = "2.5"
 rusqlite = { version = "=0.41.0", features = ["bundled"], optional = true }
 uuid = { version = "=1.29.0", features = ["v4"], optional = true }
+getrandom = { version = "=0.3.4", optional = true }
 
 [[test]]
 name = "state_store"
@@ -49,6 +51,10 @@ required-features = ["engine-qualification"]
 [[test]]
 name = "engine_persistent"
 required-features = ["durable-engine"]
+
+[[test]]
+name = "policy_proxy"
+required-features = ["policy-proxy"]
 
 [profile.release]
 lto = "thin"

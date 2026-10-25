@@ -63,6 +63,30 @@ fn special_ipv6_destinations_are_denied() {
 }
 
 #[test]
+fn explicit_lan_mode_allows_private_but_not_link_local_or_documentation() {
+    let policy = DestinationPolicy::AllowLan;
+    for address in [
+        "127.0.0.1",
+        "10.2.3.4",
+        "172.16.4.5",
+        "192.168.1.2",
+        "::1",
+        "fd00::1",
+    ] {
+        assert!(policy.permits_ip(ip(address)), "{address}");
+    }
+    for address in [
+        "169.254.169.254",
+        "192.0.2.1",
+        "fe80::1",
+        "2001:db8::1",
+        "ff02::1",
+    ] {
+        assert!(!policy.permits_ip(ip(address)), "{address}");
+    }
+}
+
+#[test]
 fn tracker_url_requires_http_without_embedded_credentials() {
     let policy = DestinationPolicy::PublicOnly;
     assert!(

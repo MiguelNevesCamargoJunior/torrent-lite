@@ -5,6 +5,8 @@ pub mod engine_storage;
 pub mod magnet;
 pub mod network_policy;
 pub mod path_policy;
+#[cfg(feature = "policy-proxy")]
+pub mod policy_proxy;
 pub mod safe_storage;
 #[cfg(feature = "state-store")]
 pub mod state_store;

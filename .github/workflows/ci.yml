@@ -26,6 +26,8 @@ jobs:
         run: cargo +1.91.1 clippy --locked --all-targets --features state-store -- -D warnings
       - name: Durable engine lints
         run: cargo +1.91.1 clippy --locked --all-targets --features durable-engine -- -D warnings
+      - name: Policy proxy lints
+        run: cargo +1.91.1 clippy --locked --all-targets --features policy-proxy -- -D warnings
       - name: Tests
         run: cargo +1.91.1 test --locked
       - name: Durable state tests
@@ -34,4 +36,6 @@ jobs:
         run: cargo +1.91.1 test --locked --features engine-qualification --test engine_local
       - name: Persistent engine storage qualification
         run: cargo +1.91.1 test --locked --features durable-engine --test engine_persistent
+      - name: Local network policy proxy
+        run: cargo +1.91.1 test --locked --features policy-proxy --test policy_proxy
 

@@ -10,6 +10,7 @@ use url::{Host, Url};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DestinationPolicy {
     PublicOnly,
+    AllowLan,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -34,6 +35,25 @@ fn in_v6_range(address: Ipv6Addr, network: Ipv6Addr, prefix: u32) -> bool {
 
 impl DestinationPolicy {
     pub fn permits_ip(self, address: IpAddr) -> bool {
+        if self == Self::AllowLan {
+            match address {
+                IpAddr::V4(ip)
+                    if in_v4_range(ip, [10, 0, 0, 0], 8)
+                        || in_v4_range(ip, [127, 0, 0, 0], 8)
+                        || in_v4_range(ip, [172, 16, 0, 0], 12)
+                        || in_v4_range(ip, [192, 168, 0, 0], 16) =>
+                {
+                    return true;
+                }
+                IpAddr::V6(ip)
+                    if ip.is_loopback()
+                        || in_v6_range(ip, Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 0), 7) =>
+                {
+                    return true;
+                }
+                _ => {}
+            }
+        }
         match address {
             IpAddr::V4(address) => {
                 // Deny all currently non-global special blocks and the whole 192.0.0/24

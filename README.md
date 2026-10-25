@@ -35,7 +35,7 @@ Inspect a local v1 metainfo file without starting a download:
 cargo run --locked -- inspect-torrent path/to/file.torrent --json
 ```
 
-The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The experimental engine adapter now uses those persisted identities in a synthetic loopback test. There is no production network destination policy, process crash recovery or service orchestration yet. Actual downloads through the CLI are not available yet.
+The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The experimental engine adapter now uses those persisted identities in a synthetic loopback test. A local authenticated SOCKS5 proxy applies a destination policy in isolated tests, but it is not yet connected to a production engine session. Process crash recovery and service orchestration are also pending. Actual downloads through the CLI are not available yet.
 
 ## License
 
