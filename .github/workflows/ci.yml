@@ -5,6 +5,26 @@ on:
 permissions:
   contents: read
 jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install browser test dependencies
+        run: npm ci
+      - name: Install test browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Browser dashboard interactions
+        run: npm run test:browser
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-results
+          path: test-results/
+          retention-days: 7
   test:
     strategy:
       fail-fast: false

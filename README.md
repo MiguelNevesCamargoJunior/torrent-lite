@@ -90,6 +90,7 @@ cargo run --locked --features browser-ui -- ui --state path/to/state.db
 ```
 
 Open the local URL printed by `ui`. The dashboard refreshes every two seconds, shows verified progress and available engine speed/peer estimates, and lets you add magnets or `.torrent` files, choose files while paused, pause, resume, verify, remove records and stop the service with confirmation. Removing a record preserves downloaded files. Unknown values appear as unavailable. Closing `ui` does not stop downloads. The URL gives access to local controls while the `ui` process runs, so treat it as private. Browser mutations require a separate temporary CSRF token and exact same-origin requests; see [UI security design](docs/ui-plan.md).
+The dashboard also shows ETA only while a live download has a measured nonzero rate. Development browser tests cover keyboard controls, CSRF submission, text rendering and ETA in Chromium, Firefox and WebKit; see the [browser qualification contract](docs/browser-qualification-spec.md).
 
 For MCP clients that launch a stdio command:
 
