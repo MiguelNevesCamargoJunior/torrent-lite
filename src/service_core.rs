@@ -216,10 +216,10 @@ impl ServiceCore {
         let bytes = sanitize_torrent_with_policy(&source, self.policy)?.bytes;
         self.activate_source(&item, AddTorrent::from_bytes(bytes), None, true)
             .await?;
-        if item.desired == DesiredState::Running {
-            if let Some(handle) = self.handles.lock().await.get(id).cloned() {
-                self.session.unpause(&handle).await?;
-            }
+        if item.desired == DesiredState::Running
+            && let Some(handle) = self.handles.lock().await.get(id).cloned()
+        {
+            self.session.unpause(&handle).await?;
         }
         Ok(())
     }

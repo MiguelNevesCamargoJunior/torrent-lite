@@ -16,6 +16,7 @@ The current foundation establishes input validation, an offline inspection CLI a
 - [Engine assessment](docs/engine-assessment.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
+- [Roadmap and release gates](docs/roadmap.md)
 
 ## Principles
 
