@@ -1,5 +1,17 @@
 use crate::{InputError, path_policy::validate_file_set};
 use librqbit_core::torrent_metainfo::torrent_from_bytes;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct RootVersion {
+    info: InfoVersion,
+}
+
+#[derive(Deserialize)]
+struct InfoVersion {
+    #[serde(rename = "meta version")]
+    meta_version: Option<u8>,
+}
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub struct TorrentSummary {
@@ -19,6 +31,11 @@ pub struct TorrentFile {
 pub fn inspect_torrent(bytes: &[u8]) -> Result<TorrentSummary, InputError> {
     if bytes.len() > 8 * 1024 * 1024 {
         return Err(InputError::TooLarge);
+    }
+    let marker: RootVersion =
+        librqbit_bencode::from_bytes(bytes).map_err(|_| InputError::InvalidTorrent)?;
+    if marker.info.meta_version.is_some() {
+        return Err(InputError::UnsupportedFormat);
     }
     let meta = torrent_from_bytes(bytes).map_err(|_| InputError::InvalidTorrent)?;
     let info = meta

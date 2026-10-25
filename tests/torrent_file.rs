@@ -59,3 +59,30 @@ fn rejects_invalid_or_oversize_metadata() {
         Err(InputError::TooLarge)
     );
 }
+
+#[test]
+fn rejects_v2_and_hybrid_metadata_explicitly() {
+    let mut hybrid = single(b"file.txt", b"");
+    hybrid.splice(
+        hybrid.len() - 2..hybrid.len() - 2,
+        b"12:meta versioni2e".iter().copied(),
+    );
+    assert_eq!(inspect_torrent(&hybrid), Err(InputError::UnsupportedFormat));
+
+    let v2 = b"d4:infod12:meta versioni2e4:name8:file.txtee";
+    assert_eq!(inspect_torrent(v2), Err(InputError::UnsupportedFormat));
+}
+
+#[test]
+fn reads_multifile_paths_and_private_flag() {
+    let mut info = b"d5:filesld6:lengthi2e4:pathl3:dir5:a.txteed6:lengthi2e4:pathl3:dir5:b.txteee4:name4:root12:piece lengthi4e6:pieces20:".to_vec();
+    info.extend([0_u8; 20]);
+    info.extend(b"7:privatei1ee");
+    let value = inspect_torrent(&metainfo(&info)).unwrap();
+    assert_eq!(value.name, "root");
+    assert_eq!(value.total_bytes, 4);
+    assert_eq!(value.files.len(), 2);
+    assert_eq!(value.files[0].path, ["dir", "a.txt"]);
+    assert_eq!(value.files[1].path, ["dir", "b.txt"]);
+    assert!(value.private);
+}

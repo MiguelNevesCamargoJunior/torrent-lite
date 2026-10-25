@@ -1029,6 +1029,7 @@ version = "0.1.0-dev"
 dependencies = [
  "clap",
  "data-encoding",
+ "librqbit-bencode",
  "librqbit-core",
  "serde",
  "serde_json",

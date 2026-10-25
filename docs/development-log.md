@@ -34,3 +34,4 @@ Ruling: no production engine dependency yet. Source inspection found qualificati
 - User requested direct commits on main. GitHub main already contained merge commit 225f90a for PR #1; local main fast-forwarded to it without overwriting remote work.
 - Added `librqbit-core = 9.0.1` only for bounded, offline v1 metainfo parsing. Three tests first failed against a rejecting seam, then passed for known infohash, unsafe Windows name, symlink attribute and 8 MiB bound.
 - Added `inspect-torrent` CLI with bounded read and sanitized errors. Process test for synthetic .torrent first failed because command was absent, then passed.
+- Found the published v1 parser accepts hybrid metainfo with a `meta version` field. A regression test first returned a summary for the hybrid; an explicit metadata marker parse now rejects v2 and hybrid torrents before treating them as v1. A synthetic multi-file fixture confirms decoded file paths and the private flag.
