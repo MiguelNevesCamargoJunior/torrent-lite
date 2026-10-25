@@ -99,6 +99,13 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
         content
     );
     assert!(service.proxy_connections() > 0);
+    service.pause(&item.id).await.unwrap();
+    assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);
+    service.stop().await;
+    let service = ServiceCore::open(&database, &download, DestinationPolicy::AllowLan)
+        .await
+        .unwrap();
+    assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);
     service.stop().await;
     tracker_task.abort();
     seeder.stop().await;

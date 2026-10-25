@@ -9,8 +9,8 @@ use crate::{
     state_store::{AddInput, DesiredState, SourceKind, StateStore, StoredTorrent},
 };
 use librqbit::{
-    AddTorrent, AddTorrentOptions, ConnectionOptions, ListenerOptions, ManagedTorrentHandle,
-    Session, SessionOptions, storage::StorageFactoryExt,
+    AddTorrent, AddTorrentOptions, ConnectionOptions, ListenerOptions, Session, SessionOptions,
+    storage::StorageFactoryExt, torrent_state::ManagedTorrentHandle,
 };
 use std::{
     collections::HashMap,
@@ -129,6 +129,18 @@ impl ServiceCore {
             self.activate_torrent(&item).await?;
         } else {
             anyhow::bail!("magnet activation is not implemented yet");
+        }
+        Ok(())
+    }
+
+    pub async fn pause(&self, id: &str) -> anyhow::Result<()> {
+        let _guard = self.mutation.lock().await;
+        self.state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .set_intent(id, DesiredState::Paused)?;
+        if let Some(handle) = self.handles.lock().await.get(id).cloned() {
+            self.session.pause(&handle).await?;
         }
         Ok(())
     }
