@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use torrent_lite::safe_storage::SafeRoot;
+use torrent_lite::safe_storage::{FileIdentity, SafeRoot};
 
 #[test]
 fn creates_nested_file_inside_open_root() {
@@ -47,6 +47,36 @@ fn competing_creates_have_one_winner() {
     );
 }
 
+#[test]
+fn reopens_only_the_file_with_the_recorded_identity() {
+    let sandbox = tempfile::tempdir().unwrap();
+    let root = SafeRoot::open(sandbox.path()).unwrap();
+    let mut original = root.create_new(&["data.bin"]).unwrap();
+    original.write_all(b"partial").unwrap();
+    let identity = FileIdentity::from_file(&original).unwrap();
+    drop(original);
+    let mut reopened = root.open_existing(&["data.bin"], identity).unwrap();
+    let mut data = Vec::new();
+    reopened.read_to_end(&mut data).unwrap();
+    assert_eq!(data, b"partial");
+
+    let other = root.create_new(&["other.bin"]).unwrap();
+    let other_identity = FileIdentity::from_file(&other).unwrap();
+    assert!(root.open_existing(&["data.bin"], other_identity).is_err());
+}
+
+#[test]
+fn refuses_a_hard_link_even_with_matching_identity() {
+    let sandbox = tempfile::tempdir().unwrap();
+    let root_path = sandbox.path().join("root");
+    std::fs::create_dir(&root_path).unwrap();
+    let root = SafeRoot::open(&root_path).unwrap();
+    let original = root.create_new(&["data.bin"]).unwrap();
+    let identity = FileIdentity::from_file(&original).unwrap();
+    std::fs::hard_link(root_path.join("data.bin"), sandbox.path().join("alias.bin")).unwrap();
+    assert!(root.open_existing(&["data.bin"], identity).is_err());
+}
+
 #[cfg(unix)]
 #[test]
 fn rejects_parent_symlink_outside_root() {
@@ -58,6 +88,13 @@ fn rejects_parent_symlink_outside_root() {
     std::os::unix::fs::symlink(&outside, root_path.join("linked")).unwrap();
     let root = SafeRoot::open(&root_path).unwrap();
     assert!(root.create_new(&["linked", "escape.bin"]).is_err());
+    let outside_root = SafeRoot::open(&outside).unwrap();
+    let outside_file = outside_root.create_new(&["present.bin"]).unwrap();
+    let identity = FileIdentity::from_file(&outside_file).unwrap();
+    assert!(
+        root.open_existing(&["linked", "present.bin"], identity)
+            .is_err()
+    );
     assert!(!outside.join("escape.bin").exists());
 }
 
@@ -72,6 +109,9 @@ fn rejects_final_symlink_to_existing_file() {
     std::os::unix::fs::symlink(&outside, root_path.join("linked.bin")).unwrap();
     let root = SafeRoot::open(&root_path).unwrap();
     assert!(root.create_new(&["linked.bin"]).is_err());
+    let outside_file = cap_std::fs::File::from_std(std::fs::File::open(&outside).unwrap());
+    let identity = FileIdentity::from_file(&outside_file).unwrap();
+    assert!(root.open_existing(&["linked.bin"], identity).is_err());
     assert_eq!(std::fs::read(&outside).unwrap(), b"unchanged");
 }
 
@@ -97,5 +137,12 @@ fn rejects_parent_junction_outside_root() {
     );
     let root = SafeRoot::open(&root_path).unwrap();
     assert!(root.create_new(&["linked", "escape.bin"]).is_err());
+    let outside_root = SafeRoot::open(&outside).unwrap();
+    let outside_file = outside_root.create_new(&["present.bin"]).unwrap();
+    let identity = FileIdentity::from_file(&outside_file).unwrap();
+    assert!(
+        root.open_existing(&["linked", "present.bin"], identity)
+            .is_err()
+    );
     assert!(!outside.join("escape.bin").exists());
 }

@@ -8,7 +8,7 @@ The approved design targets one download service with a CLI, a local browser UI 
 
 ## Development status
 
-The first milestone establishes input validation and an offline inspection CLI, plus an explicit compatibility/security gate for the proposed `librqbit` engine. Downloading, persistence, MCP and the web UI are subsequent milestones; they are not implemented by the initial foundation.
+The first milestone establishes input validation and an offline inspection CLI, plus an explicit compatibility/security gate for the proposed `librqbit` engine. A capability-scoped helper can create new files inside a chosen root, and a feature-gated local-peer test exercises the engine. Downloading through the CLI, persistence, MCP and the web UI are subsequent milestones.
 
 - [Design](docs/superpowers/specs/2026-10-25-torrent-design.md) (Portuguese)
 - [Initial implementation plan](docs/superpowers/plans/2026-10-25-foundation.md)
@@ -34,7 +34,7 @@ Inspect a local v1 metainfo file without starting a download:
 cargo run --locked -- inspect-torrent path/to/file.torrent --json
 ```
 
-The library validates portable path components and rejects file/directory collisions. These are lexical checks, not filesystem confinement. Actual downloads are not available yet.
+The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. This storage remains a building block and a local-peer experiment, with no production persistence or network destination policy yet. Actual downloads through the CLI are not available yet.
 
 ## License
 

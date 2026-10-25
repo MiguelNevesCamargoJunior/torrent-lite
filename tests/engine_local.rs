@@ -8,12 +8,15 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use torrent_lite::safe_storage::SafeRoot;
+use torrent_lite::safe_storage::{FileIdentity, SafeRoot};
 
 // Qualification adapter: new files only. It is intentionally unsuitable for
 // production restart until existing-file identity is persisted and checked.
 #[derive(Clone)]
-struct NewFileFactory(Arc<SafeRoot>);
+struct NewFileFactory {
+    root: Arc<SafeRoot>,
+    identities: Option<Vec<FileIdentity>>,
+}
 
 impl StorageFactory for NewFileFactory {
     type Storage = NewFileStorage;
@@ -24,7 +27,8 @@ impl StorageFactory for NewFileFactory {
         _: &librqbit::TorrentMetadata,
     ) -> anyhow::Result<Self::Storage> {
         Ok(NewFileStorage {
-            root: self.0.clone(),
+            root: self.root.clone(),
+            identities: self.identities.clone(),
             files: Vec::new(),
         })
     }
@@ -36,6 +40,7 @@ impl StorageFactory for NewFileFactory {
 
 struct NewFileStorage {
     root: Arc<SafeRoot>,
+    identities: Option<Vec<FileIdentity>>,
     files: Vec<Mutex<cap_std::fs::File>>,
 }
 
@@ -45,7 +50,7 @@ impl TorrentStorage for NewFileStorage {
         _: &librqbit::ManagedTorrentShared,
         metadata: &librqbit::TorrentMetadata,
     ) -> anyhow::Result<()> {
-        for info in &metadata.file_infos {
+        for (index, info) in metadata.file_infos.iter().enumerate() {
             let components: Vec<&str> = info
                 .relative_filename
                 .components()
@@ -55,8 +60,16 @@ impl TorrentStorage for NewFileStorage {
                         .ok_or_else(|| anyhow::anyhow!("non-UTF8 file path"))
                 })
                 .collect::<anyhow::Result<_>>()?;
-            self.files
-                .push(Mutex::new(self.root.create_new(&components)?));
+            let file = match &self.identities {
+                Some(identities) => self.root.open_existing(
+                    &components,
+                    *identities
+                        .get(index)
+                        .ok_or_else(|| anyhow::anyhow!("missing file identity"))?,
+                )?,
+                None => self.root.create_new(&components)?,
+            };
+            self.files.push(Mutex::new(file));
         }
         Ok(())
     }
@@ -96,6 +109,7 @@ impl TorrentStorage for NewFileStorage {
             .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(Box::new(Self {
             root: self.root.clone(),
+            identities: self.identities.clone(),
             files,
         }))
     }
@@ -155,7 +169,11 @@ async fn transfers_a_synthetic_file_between_local_sessions() {
                 initial_peers: Some(vec![peer]),
                 peer_limit: Some(2),
                 storage_factory: Some(
-                    NewFileFactory(Arc::new(SafeRoot::open(&destination).unwrap())).boxed(),
+                    NewFileFactory {
+                        root: Arc::new(SafeRoot::open(&destination).unwrap()),
+                        identities: None,
+                    }
+                    .boxed(),
                 ),
                 ..Default::default()
             }),
@@ -174,6 +192,10 @@ async fn transfers_a_synthetic_file_between_local_sessions() {
     );
     leecher.stop().await;
     let downloaded = destination.join("synthetic.bin");
+    let stored_identity = FileIdentity::from_file(&cap_std::fs::File::from_std(
+        std::fs::File::open(&downloaded).unwrap(),
+    ))
+    .unwrap();
     let mut damaged = std::fs::read(&downloaded).unwrap();
     damaged[17_000] ^= 0xff;
     std::fs::write(&downloaded, damaged).unwrap();
@@ -188,6 +210,13 @@ async fn transfers_a_synthetic_file_between_local_sessions() {
                 initial_peers: Some(vec![peer]),
                 peer_limit: Some(2),
                 overwrite: true,
+                storage_factory: Some(
+                    NewFileFactory {
+                        root: Arc::new(SafeRoot::open(&destination).unwrap()),
+                        identities: Some(vec![stored_identity]),
+                    }
+                    .boxed(),
+                ),
                 ..Default::default()
             }),
         )

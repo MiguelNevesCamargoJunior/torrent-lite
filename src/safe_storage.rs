@@ -1,13 +1,38 @@
-//! Create new torrent files relative to an already opened directory handle.
-//! Existing files need a separate, identity-checked resume path before use.
+//! Open torrent files relative to an already opened directory handle.
 
 use crate::path_policy::validate_components;
-use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+use cap_fs_ext::{FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
 use cap_std::{
     ambient_authority,
     fs::{Dir, File, OpenOptions},
 };
-use std::{io, path::Path};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
+
+/// Persist this value with the torrent's state before reusing any existing file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+impl FileIdentity {
+    pub fn from_file(file: &File) -> io::Result<Self> {
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.nlink() != 1 || metadata.ino() == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "unsupported file identity",
+            ));
+        }
+        Ok(Self {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+}
 
 pub struct SafeRoot {
     dir: Dir,
@@ -47,5 +72,25 @@ impl SafeRoot {
         options.read(true).write(true).create_new(true);
         options.follow(FollowSymlinks::No);
         parent.open_with(components[components.len() - 1], &options)
+    }
+
+    /// Reopen a previously created file only when its handle still has the recorded identity.
+    pub fn open_existing(&self, components: &[&str], identity: FileIdentity) -> io::Result<File> {
+        validate_components(components)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        let relative = components.iter().fold(PathBuf::new(), |mut path, name| {
+            path.push(name);
+            path
+        });
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).follow(FollowSymlinks::No);
+        let file = self.dir.open_with(relative, &options)?;
+        if FileIdentity::from_file(&file)? != identity {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "file identity changed",
+            ));
+        }
+        Ok(file)
     }
 }
