@@ -454,8 +454,10 @@ impl StateStore {
             return Err(StoreError::Input(InputError::TooLarge));
         }
         let parsed = inspect_torrent(metainfo)?;
-        let record: Option<(String, String)> = self
+        let transaction = self
             .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let record: Option<(String, String)> = transaction
             .query_row(
                 "SELECT info_hash,source_kind FROM torrents WHERE id=?1 AND tombstone=0",
                 [id],
@@ -466,11 +468,14 @@ impl StateStore {
         if kind != "magnet" || parsed.info_hash != info_hash {
             return Err(StoreError::Conflict);
         }
-        self.connection.execute(
+        transaction.execute(
             "INSERT INTO resolved_metainfo(torrent_id,metainfo) VALUES (?1,?2)
              ON CONFLICT(torrent_id) DO UPDATE SET metainfo=excluded.metainfo",
             params![id, metainfo],
         )?;
+        #[cfg(test)]
+        crash_before_commit("resolved_metainfo");
+        transaction.commit()?;
         Ok(())
     }
 
@@ -548,17 +553,22 @@ impl StateStore {
         indices: Option<&[usize]>,
     ) -> Result<(), StoreError> {
         self.validate_file_selection(id, indices)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(indices) = indices {
             let json = serde_json::to_string(indices).map_err(|_| StoreError::Corrupt)?;
-            self.connection.execute(
+            transaction.execute(
                 "INSERT INTO file_selection(torrent_id,selection_json) VALUES (?1,?2)
                  ON CONFLICT(torrent_id) DO UPDATE SET selection_json=excluded.selection_json",
                 params![id, json],
             )?;
         } else {
-            self.connection
-                .execute("DELETE FROM file_selection WHERE torrent_id=?1", [id])?;
+            transaction.execute("DELETE FROM file_selection WHERE torrent_id=?1", [id])?;
         }
+        #[cfg(test)]
+        crash_before_commit("file_selection");
+        transaction.commit()?;
         Ok(())
     }
 
