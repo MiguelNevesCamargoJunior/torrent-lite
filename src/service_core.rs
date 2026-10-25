@@ -32,6 +32,18 @@ pub struct ServiceCore {
     mutation: AsyncMutex<()>,
 }
 
+pub struct TorrentMetrics {
+    pub observed_state: String,
+    pub progress_bytes: u64,
+    pub total_bytes: u64,
+    pub finished: bool,
+    pub uploaded_bytes: u64,
+    pub download_bytes_per_sec: Option<u64>,
+    pub upload_bytes_per_sec: Option<u64>,
+    pub peers: Option<u32>,
+    pub eta_secs: Option<u64>,
+}
+
 impl ServiceCore {
     pub async fn open(
         database: &Path,
@@ -108,6 +120,39 @@ impl ServiceCore {
         Some((stats.progress_bytes, stats.total_bytes, stats.finished))
     }
 
+    pub async fn metrics(&self, id: &str) -> Option<TorrentMetrics> {
+        let handle = self.handles.lock().await.get(id).cloned()?;
+        let stats = handle.stats();
+        let (download_bytes_per_sec, upload_bytes_per_sec, peers, eta_secs) =
+            if let Some(live) = &stats.live {
+                let down = live.download_speed.as_bytes();
+                (
+                    Some(down),
+                    Some(live.upload_speed.as_bytes()),
+                    Some(live.snapshot.peer_stats.live),
+                    (down > 0).then(|| {
+                        stats
+                            .total_bytes
+                            .saturating_sub(stats.progress_bytes)
+                            .div_ceil(down)
+                    }),
+                )
+            } else {
+                (None, None, None, None)
+            };
+        Some(TorrentMetrics {
+            observed_state: stats.state.to_string(),
+            progress_bytes: stats.progress_bytes,
+            total_bytes: stats.total_bytes,
+            finished: stats.finished,
+            uploaded_bytes: stats.uploaded_bytes,
+            download_bytes_per_sec,
+            upload_bytes_per_sec,
+            peers,
+            eta_secs,
+        })
+    }
+
     pub async fn add_torrent(&self, bytes: &[u8], paused: bool) -> anyhow::Result<StoredTorrent> {
         let _guard = self.mutation.lock().await;
         let sanitized = sanitize_torrent_with_policy(bytes, self.policy)?;
@@ -167,7 +212,8 @@ impl ServiceCore {
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .set_intent(id, DesiredState::Running)?;
-        if let Some(handle) = self.handles.lock().await.get(id).cloned() {
+        let current_handle = { self.handles.lock().await.get(id).cloned() };
+        if let Some(handle) = current_handle {
             self.session.unpause(&handle).await?;
         } else {
             match item.source_kind {
@@ -211,7 +257,8 @@ impl ServiceCore {
             }
         };
         let bytes = sanitize_torrent_with_policy(&source, self.policy)?.bytes;
-        if let Some(handle) = self.handles.lock().await.get(id).cloned() {
+        let current_handle = { self.handles.lock().await.get(id).cloned() };
+        if let Some(handle) = current_handle {
             self.session
                 .delete(TorrentIdOrHash::Id(handle.id()), false)
                 .await?;

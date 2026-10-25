@@ -80,6 +80,9 @@ async fn add_rejects_unauthorized_body_and_registers_paused_magnet() {
         service.list().unwrap()[0].desired,
         torrent_lite::state_store::DesiredState::Paused
     );
+    let listed = request(addr, &format!("{host}{secret}")).await;
+    assert!(listed.contains("\"observed_state\":null"));
+    assert!(listed.contains("\"download_bytes_per_sec\":null"));
     drop(api);
     service.stop().await;
 }

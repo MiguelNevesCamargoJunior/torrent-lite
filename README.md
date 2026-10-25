@@ -78,7 +78,7 @@ cargo run --locked --features api-client -- remove TORRENT_ID --state path/to/st
 cargo run --locked --features browser-ui -- ui --state path/to/state.db
 ```
 
-Open the local URL printed by `ui`. The dashboard refreshes every two seconds and contains no external resources. Closing `ui` does not stop downloads. The URL grants read-only access while that `ui` process runs, so treat it as private.
+Open the local URL printed by `ui`. The dashboard refreshes every two seconds, shows verified progress and available engine speed/peer estimates, and contains no external resources. Unknown values appear as unavailable. Closing `ui` does not stop downloads. The URL grants read-only access while that `ui` process runs, so treat it as private.
 
 For MCP clients that launch a stdio command:
 

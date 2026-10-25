@@ -103,6 +103,11 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     assert_eq!(completed, content.len() as u64);
     assert_eq!(total, content.len() as u64);
     assert!(finished);
+    let metrics = service.metrics(&item.id).await.unwrap();
+    assert_eq!(metrics.progress_bytes, content.len() as u64);
+    assert_eq!(metrics.total_bytes, content.len() as u64);
+    assert!(metrics.finished);
+    assert!(metrics.observed_state == "live" || metrics.observed_state == "paused");
     assert!(service.proxy_connections() > 0);
     service.pause(&item.id).await.unwrap();
     assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);

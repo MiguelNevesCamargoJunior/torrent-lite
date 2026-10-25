@@ -59,6 +59,12 @@ pub struct TorrentView {
     pub progress_bytes: Option<u64>,
     pub total_bytes: Option<u64>,
     pub finished: Option<bool>,
+    pub observed_state: Option<String>,
+    pub uploaded_bytes: Option<u64>,
+    pub download_bytes_per_sec: Option<u64>,
+    pub upload_bytes_per_sec: Option<u64>,
+    pub peers: Option<u32>,
+    pub eta_secs: Option<u64>,
 }
 
 pub struct LocalApi {
@@ -155,7 +161,7 @@ async fn list(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut output = Vec::with_capacity(records.len());
     for item in records {
-        let progress = state.service.progress(&item.id).await;
+        let metrics = state.service.metrics(&item.id).await;
         output.push(TorrentView {
             id: item.id,
             info_hash: item.info_hash,
@@ -169,9 +175,19 @@ async fn list(
                 DesiredState::Paused => "paused",
             }
             .to_owned(),
-            progress_bytes: progress.map(|value| value.0),
-            total_bytes: progress.map(|value| value.1),
-            finished: progress.map(|value| value.2),
+            progress_bytes: metrics.as_ref().map(|value| value.progress_bytes),
+            total_bytes: metrics.as_ref().map(|value| value.total_bytes),
+            finished: metrics.as_ref().map(|value| value.finished),
+            observed_state: metrics.as_ref().map(|value| value.observed_state.clone()),
+            uploaded_bytes: metrics.as_ref().map(|value| value.uploaded_bytes),
+            download_bytes_per_sec: metrics
+                .as_ref()
+                .and_then(|value| value.download_bytes_per_sec),
+            upload_bytes_per_sec: metrics
+                .as_ref()
+                .and_then(|value| value.upload_bytes_per_sec),
+            peers: metrics.as_ref().and_then(|value| value.peers),
+            eta_secs: metrics.as_ref().and_then(|value| value.eta_secs),
         });
     }
     Ok(Json(output))
