@@ -54,6 +54,7 @@ pub struct AddView {
 pub struct TorrentView {
     pub id: String,
     pub info_hash: String,
+    pub name: Option<String>,
     pub source_kind: String,
     pub desired: String,
     pub progress_bytes: Option<u64>,
@@ -165,6 +166,7 @@ async fn list(
         output.push(TorrentView {
             id: item.id,
             info_hash: item.info_hash,
+            name: metrics.as_ref().and_then(|value| value.name.clone()),
             source_kind: match item.source_kind {
                 SourceKind::Torrent => "torrent",
                 SourceKind::Magnet => "magnet",

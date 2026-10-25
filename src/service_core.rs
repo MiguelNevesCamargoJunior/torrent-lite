@@ -34,6 +34,7 @@ pub struct ServiceCore {
 
 #[derive(Debug)]
 pub struct TorrentMetrics {
+    pub name: Option<String>,
     pub observed_state: String,
     pub progress_bytes: u64,
     pub total_bytes: u64,
@@ -142,6 +143,7 @@ impl ServiceCore {
                 (None, None, None, None)
             };
         Some(TorrentMetrics {
+            name: handle.name(),
             observed_state: stats.state.to_string(),
             progress_bytes: stats.progress_bytes,
             total_bytes: stats.total_bytes,

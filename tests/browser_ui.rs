@@ -44,6 +44,10 @@ async fn local_dashboard_requires_ephemeral_path_and_restricts_browser() {
     assert!(page.starts_with("HTTP/1.1 200"));
     assert!(page.contains("content-security-policy:"));
     assert!(page.contains("cache-control: no-store"));
+    assert!(page.contains("Transferências"));
+    assert!(page.contains("setAttribute('role','progressbar')"));
+    assert!(!page.contains("<script src="));
+    assert!(!page.contains("<link rel=\"stylesheet\""));
     assert!(!page.contains(api.token()));
     assert!(
         get(addr, "/wrong/", &addr.to_string())
