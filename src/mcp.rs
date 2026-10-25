@@ -26,6 +26,7 @@ struct AddMagnet {
 pub struct McpServer {
     state: PathBuf,
     read_only: bool,
+    #[expect(dead_code, reason = "tool_handler macro accesses this router field")]
     tool_router: ToolRouter<Self>,
 }
 
@@ -37,6 +38,7 @@ impl McpServer {
                 "torrent_add_magnet",
                 "torrent_pause",
                 "torrent_resume",
+                "torrent_verify",
                 "torrent_remove",
             ] {
                 tool_router.remove_route(name);
@@ -138,6 +140,20 @@ impl McpServer {
         }
         match self.client() {
             Ok(client) if client.resume(&id).await.is_ok() => ok(format!("Resumed {id}")),
+            _ => failed(),
+        }
+    }
+
+    #[tool(description = "Recheck local pieces of a registered .torrent without network traffic")]
+    async fn torrent_verify(
+        &self,
+        Parameters(TorrentId { id }): Parameters<TorrentId>,
+    ) -> CallToolResult {
+        if self.read_only {
+            return failed();
+        }
+        match self.client() {
+            Ok(client) if client.verify(&id).await.is_ok() => ok(format!("Verified {id}")),
             _ => failed(),
         }
     }

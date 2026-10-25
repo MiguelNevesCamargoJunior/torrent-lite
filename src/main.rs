@@ -66,6 +66,13 @@ enum Commands {
         #[arg(long)]
         state: std::path::PathBuf,
     },
+    /// Recheck local pieces of a registered .torrent without network traffic.
+    #[cfg(feature = "api-client")]
+    Verify {
+        id: String,
+        #[arg(long)]
+        state: std::path::PathBuf,
+    },
     /// Run the local download service and authenticated API in the foreground.
     #[cfg(feature = "local-api")]
     Serve {
@@ -142,6 +149,8 @@ fn main() -> ExitCode {
         Commands::Resume { id, state } => return run_client(ClientAction::Resume(id), state),
         #[cfg(feature = "api-client")]
         Commands::Remove { id, state } => return run_client(ClientAction::Remove(id), state),
+        #[cfg(feature = "api-client")]
+        Commands::Verify { id, state } => return run_client(ClientAction::Verify(id), state),
         #[cfg(feature = "local-api")]
         Commands::Serve { output, state } => return run_serve(output, state),
         #[cfg(feature = "service-core")]
@@ -269,6 +278,7 @@ enum ClientAction {
     Pause(String),
     Resume(String),
     Remove(String),
+    Verify(String),
 }
 
 #[cfg(feature = "api-client")]
@@ -332,6 +342,10 @@ fn run_client(action: ClientAction, state: std::path::PathBuf) -> ExitCode {
             ClientAction::Remove(id) => {
                 client.remove(&id).await?;
                 Ok(format!("Removed record: {id}"))
+            }
+            ClientAction::Verify(id) => {
+                client.verify(&id).await?;
+                Ok(format!("Verified: {id}"))
             }
         }
     });

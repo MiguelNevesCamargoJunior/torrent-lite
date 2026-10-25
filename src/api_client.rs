@@ -75,7 +75,22 @@ impl LocalClient {
         self.post(id, "remove").await
     }
 
+    pub async fn verify(&self, id: &str) -> anyhow::Result<()> {
+        self.post_with_timeout(id, "verify", Duration::from_secs(3600))
+            .await
+    }
+
     async fn post(&self, id: &str, action: &str) -> anyhow::Result<()> {
+        self.post_with_timeout(id, action, Duration::from_secs(5))
+            .await
+    }
+
+    async fn post_with_timeout(
+        &self,
+        id: &str,
+        action: &str,
+        timeout: Duration,
+    ) -> anyhow::Result<()> {
         let parsed = uuid::Uuid::parse_str(id).context("invalid torrent ID")?;
         ensure!(parsed.hyphenated().to_string() == id, "invalid torrent ID");
         let response = self
@@ -85,6 +100,7 @@ impl LocalClient {
                 self.addr
             ))
             .bearer_auth(&self.token)
+            .timeout(timeout)
             .send()
             .await?;
         ensure!(

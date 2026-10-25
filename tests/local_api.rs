@@ -136,6 +136,12 @@ async fn removal_requires_authorization_and_preserves_downloaded_files() {
         service.list().unwrap()[0].desired,
         torrent_lite::state_store::DesiredState::Paused
     );
+    let verify_path = format!("/api/v1/torrents/{}/verify", item.id);
+    assert!(
+        request_target(addr, "POST", &verify_path, &format!("{host}{secret}"))
+            .await
+            .starts_with("HTTP/1.1 422")
+    );
     assert!(
         request_target(addr, "POST", &path, &format!("{host}{secret}"))
             .await

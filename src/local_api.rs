@@ -89,6 +89,7 @@ impl LocalApi {
             .route("/api/v1/torrents/{id}/remove", post(remove))
             .route("/api/v1/torrents/{id}/pause", post(pause))
             .route("/api/v1/torrents/{id}/resume", post(resume))
+            .route("/api/v1/torrents/{id}/verify", post(verify))
             .with_state(state);
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
@@ -245,6 +246,21 @@ async fn remove(
         .remove(&id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn verify(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    authorize(&headers, &state)?;
+    require_id(&state, &id)?;
+    state
+        .service
+        .verify(&id)
+        .await
+        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

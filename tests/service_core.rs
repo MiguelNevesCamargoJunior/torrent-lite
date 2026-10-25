@@ -106,6 +106,21 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     assert!(service.proxy_connections() > 0);
     service.pause(&item.id).await.unwrap();
     assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);
+    let downloaded = download.join(&item.id).join("sample.bin");
+    let mut corrupted = content.clone();
+    corrupted[0] ^= 0xff;
+    std::fs::write(&downloaded, corrupted).unwrap();
+    service.verify(&item.id).await.unwrap();
+    assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);
+    let (checked, total, finished) = service.progress(&item.id).await.unwrap();
+    assert!(checked < total);
+    assert!(!finished);
+    service.resume(&item.id).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(25), service.wait_completed(&item.id))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(std::fs::read(&downloaded).unwrap(), content);
     service.remove(&item.id).await.unwrap();
     assert!(service.list().unwrap().is_empty());
     assert_eq!(

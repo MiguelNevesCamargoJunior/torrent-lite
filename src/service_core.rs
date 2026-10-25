@@ -149,6 +149,7 @@ impl ServiceCore {
                 &item,
                 AddTorrent::from_url(sanitized.uri),
                 Some(Duration::from_secs(30)),
+                false,
             )
             .await?;
         }
@@ -185,6 +186,40 @@ impl ServiceCore {
             .set_intent(id, DesiredState::Paused)?;
         if let Some(handle) = self.handles.lock().await.get(id).cloned() {
             self.session.pause(&handle).await?;
+        }
+        Ok(())
+    }
+
+    /// Recheck every piece without network traffic, then restore the stored intent.
+    pub async fn verify(&self, id: &str) -> anyhow::Result<()> {
+        let _guard = self.mutation.lock().await;
+        let item = self
+            .list()?
+            .into_iter()
+            .find(|item| item.id == id)
+            .ok_or_else(|| anyhow::anyhow!("torrent not found"))?;
+        anyhow::ensure!(
+            item.source_kind == SourceKind::Torrent,
+            "magnet verification awaits persisted metainfo"
+        );
+        if let Some(handle) = self.handles.lock().await.get(id).cloned() {
+            self.session
+                .delete(TorrentIdOrHash::Id(handle.id()), false)
+                .await?;
+            self.handles.lock().await.remove(id);
+        }
+        let source = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .load_source(id)?;
+        let bytes = sanitize_torrent_with_policy(&source, self.policy)?.bytes;
+        self.activate_source(&item, AddTorrent::from_bytes(bytes), None, true)
+            .await?;
+        if item.desired == DesiredState::Running {
+            if let Some(handle) = self.handles.lock().await.get(id).cloned() {
+                self.session.unpause(&handle).await?;
+            }
         }
         Ok(())
     }
@@ -243,12 +278,13 @@ impl ServiceCore {
             item,
             AddTorrent::from_url(uri),
             Some(Duration::from_secs(30)),
+            false,
         )
         .await
     }
 
     async fn activate_bytes(&self, item: &StoredTorrent, bytes: Vec<u8>) -> anyhow::Result<()> {
-        self.activate_source(item, AddTorrent::from_bytes(bytes), None)
+        self.activate_source(item, AddTorrent::from_bytes(bytes), None, false)
             .await
     }
 
@@ -257,6 +293,7 @@ impl ServiceCore {
         item: &StoredTorrent,
         source: AddTorrent<'_>,
         deadline: Option<Duration>,
+        start_paused: bool,
     ) -> anyhow::Result<()> {
         if self.handles.lock().await.contains_key(&item.id) {
             return Ok(());
@@ -265,6 +302,7 @@ impl ServiceCore {
         let pending = self.session.add_torrent(
             source,
             Some(AddTorrentOptions {
+                paused: start_paused,
                 overwrite: true,
                 peer_limit: Some(50),
                 storage_factory: Some(
