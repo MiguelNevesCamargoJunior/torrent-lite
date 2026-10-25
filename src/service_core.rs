@@ -376,7 +376,8 @@ impl ServiceCore {
             .set_intent(id, DesiredState::Paused)?;
         self.failures.lock().await.remove(id);
         self.cancel_pending_magnet(id).await;
-        if let Some(handle) = self.handles.lock().await.get(id).cloned()
+        let current_handle = { self.handles.lock().await.get(id).cloned() };
+        if let Some(handle) = current_handle
             && handle.stats().state.to_string() != "paused"
         {
             self.session.pause(&handle).await?;
