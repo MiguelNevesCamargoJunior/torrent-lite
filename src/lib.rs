@@ -1,5 +1,7 @@
 //! Bounded input validation and capability-scoped filesystem building blocks.
 
+#[cfg(feature = "api-client")]
+pub mod api_client;
 #[cfg(feature = "durable-engine")]
 pub mod engine_storage;
 #[cfg(feature = "local-api")]

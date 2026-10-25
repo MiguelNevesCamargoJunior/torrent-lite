@@ -3298,6 +3298,7 @@ dependencies = [
  "librqbit",
  "librqbit-bencode",
  "librqbit-core",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",

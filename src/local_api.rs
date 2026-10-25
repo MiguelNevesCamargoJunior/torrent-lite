@@ -13,7 +13,7 @@ use axum::{
     },
     routing::{get, post},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     io,
     net::{Ipv4Addr, SocketAddr},
@@ -29,15 +29,15 @@ struct ApiState {
     origin: Arc<str>,
 }
 
-#[derive(Serialize)]
-struct TorrentView {
-    id: String,
-    info_hash: String,
-    source_kind: &'static str,
-    desired: &'static str,
-    progress_bytes: Option<u64>,
-    total_bytes: Option<u64>,
-    finished: Option<bool>,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TorrentView {
+    pub id: String,
+    pub info_hash: String,
+    pub source_kind: String,
+    pub desired: String,
+    pub progress_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub finished: Option<bool>,
 }
 
 pub struct LocalApi {
@@ -139,11 +139,13 @@ async fn list(
             source_kind: match item.source_kind {
                 SourceKind::Torrent => "torrent",
                 SourceKind::Magnet => "magnet",
-            },
+            }
+            .to_owned(),
             desired: match item.desired {
                 DesiredState::Running => "running",
                 DesiredState::Paused => "paused",
-            },
+            }
+            .to_owned(),
             progress_bytes: progress.map(|value| value.0),
             total_bytes: progress.map(|value| value.1),
             finished: progress.map(|value| value.2),

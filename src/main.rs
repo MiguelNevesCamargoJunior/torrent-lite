@@ -14,6 +14,35 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// List torrents through the running local service.
+    #[cfg(feature = "api-client")]
+    List {
+        #[arg(long)]
+        state: std::path::PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pause a torrent in the running service.
+    #[cfg(feature = "api-client")]
+    Pause {
+        id: String,
+        #[arg(long)]
+        state: std::path::PathBuf,
+    },
+    /// Resume a torrent in the running service.
+    #[cfg(feature = "api-client")]
+    Resume {
+        id: String,
+        #[arg(long)]
+        state: std::path::PathBuf,
+    },
+    /// Remove a torrent record while preserving its downloaded files.
+    #[cfg(feature = "api-client")]
+    Remove {
+        id: String,
+        #[arg(long)]
+        state: std::path::PathBuf,
+    },
     /// Run the local download service and authenticated API in the foreground.
     #[cfg(feature = "local-api")]
     Serve {
@@ -72,6 +101,14 @@ fn main() -> ExitCode {
         }
     };
     let output = match command {
+        #[cfg(feature = "api-client")]
+        Commands::List { state, json } => return run_client(ClientAction::List(json), state),
+        #[cfg(feature = "api-client")]
+        Commands::Pause { id, state } => return run_client(ClientAction::Pause(id), state),
+        #[cfg(feature = "api-client")]
+        Commands::Resume { id, state } => return run_client(ClientAction::Resume(id), state),
+        #[cfg(feature = "api-client")]
+        Commands::Remove { id, state } => return run_client(ClientAction::Remove(id), state),
         #[cfg(feature = "local-api")]
         Commands::Serve { output, state } => return run_serve(output, state),
         #[cfg(feature = "service-core")]
@@ -146,6 +183,79 @@ fn main() -> ExitCode {
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
         Err(_) => {
             eprintln!("error: unable to write output");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(feature = "api-client")]
+enum ClientAction {
+    List(bool),
+    Pause(String),
+    Resume(String),
+    Remove(String),
+}
+
+#[cfg(feature = "api-client")]
+fn run_client(action: ClientAction, state: std::path::PathBuf) -> ExitCode {
+    use torrent_lite::api_client::LocalClient;
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => {
+            eprintln!("error: unable to start runtime");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result: anyhow::Result<String> = runtime.block_on(async {
+        let client = LocalClient::discover(&state)?;
+        match action {
+            ClientAction::List(json) => {
+                let rows = client.list().await?;
+                if json {
+                    Ok(serde_json::to_string(&rows)?)
+                } else if rows.is_empty() {
+                    Ok("No torrents".to_owned())
+                } else {
+                    Ok(rows
+                        .iter()
+                        .map(|row| {
+                            format!(
+                                "{}  {}  {}/{} bytes",
+                                row.id,
+                                row.desired,
+                                row.progress_bytes.unwrap_or(0),
+                                row.total_bytes.unwrap_or(0)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"))
+                }
+            }
+            ClientAction::Pause(id) => {
+                client.pause(&id).await?;
+                Ok(format!("Paused: {id}"))
+            }
+            ClientAction::Resume(id) => {
+                client.resume(&id).await?;
+                Ok(format!("Resumed: {id}"))
+            }
+            ClientAction::Remove(id) => {
+                client.remove(&id).await?;
+                Ok(format!("Removed record: {id}"))
+            }
+        }
+    });
+    match result {
+        Ok(output) => match writeln!(io::stdout().lock(), "{output}") {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) if error.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+            Err(_) => ExitCode::FAILURE,
+        },
+        Err(_) => {
+            eprintln!("error: local service unavailable or request failed");
             ExitCode::FAILURE
         }
     }
