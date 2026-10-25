@@ -119,6 +119,42 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
         .unwrap();
     assert!(service.list().unwrap().is_empty());
     service.stop().await;
+    drop(service);
+
+    let magnet_download = workspace.path().join("magnet-download");
+    std::fs::create_dir(&magnet_download).unwrap();
+    let magnet_database = workspace.path().join("magnet-state.db");
+    let magnet = format!("magnet:?xt=urn:btih:{}&tr={tracker_url}", item.info_hash);
+    let service = ServiceCore::open(
+        &magnet_database,
+        &magnet_download,
+        DestinationPolicy::AllowLan,
+    )
+    .await
+    .unwrap();
+    let magnet_item = service.add_magnet(&magnet).await.unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(25),
+        service.wait_completed(&magnet_item.id),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        std::fs::read(magnet_download.join(&magnet_item.id).join("sample.bin")).unwrap(),
+        content
+    );
+    service.stop().await;
+    drop(service);
+    let service = ServiceCore::open(
+        &magnet_database,
+        &magnet_download,
+        DestinationPolicy::AllowLan,
+    )
+    .await
+    .unwrap();
+    assert_eq!(service.list().unwrap().len(), 1);
+    service.stop().await;
     tracker_task.abort();
     seeder.stop().await;
 }

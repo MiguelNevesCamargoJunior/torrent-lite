@@ -2,7 +2,7 @@
 
 use crate::{
     engine_storage::DurableStorageFactory,
-    network_input::sanitize_torrent_with_policy,
+    network_input::{sanitize_magnet_with_policy, sanitize_torrent_with_policy},
     network_policy::DestinationPolicy,
     policy_proxy::PolicyProxy,
     safe_storage::SafeRoot,
@@ -17,6 +17,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -79,8 +80,11 @@ impl ServiceCore {
                 item.destination_root == service.root_path.to_string_lossy(),
                 "stored destination differs from configured root"
             );
-            if item.desired == DesiredState::Running && item.source_kind == SourceKind::Torrent {
-                service.activate_torrent(&item).await?;
+            if item.desired == DesiredState::Running {
+                match item.source_kind {
+                    SourceKind::Torrent => service.activate_torrent(&item).await?,
+                    SourceKind::Magnet => service.activate_magnet(&item).await?,
+                }
             }
         }
         Ok(service)
@@ -118,6 +122,29 @@ impl ServiceCore {
         Ok(item)
     }
 
+    pub async fn add_magnet(&self, magnet: &str) -> anyhow::Result<StoredTorrent> {
+        let _guard = self.mutation.lock().await;
+        let sanitized = sanitize_magnet_with_policy(magnet, self.policy)?;
+        anyhow::ensure!(
+            url::Url::parse(&sanitized.uri)?
+                .query_pairs()
+                .any(|(key, _)| key == "tr"),
+            "magnet requires an HTTP(S) tracker while DHT is disabled"
+        );
+        let item = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .register(AddInput::Magnet(magnet), &self.root_path, false)?;
+        self.activate_source(
+            &item,
+            AddTorrent::from_url(sanitized.uri),
+            Some(Duration::from_secs(30)),
+        )
+        .await?;
+        Ok(item)
+    }
+
     pub async fn resume(&self, id: &str) -> anyhow::Result<()> {
         let _guard = self.mutation.lock().await;
         let item = self
@@ -131,10 +158,11 @@ impl ServiceCore {
             .set_intent(id, DesiredState::Running)?;
         if let Some(handle) = self.handles.lock().await.get(id).cloned() {
             self.session.unpause(&handle).await?;
-        } else if item.source_kind == SourceKind::Torrent {
-            self.activate_torrent(&item).await?;
         } else {
-            anyhow::bail!("magnet activation is not implemented yet");
+            match item.source_kind {
+                SourceKind::Torrent => self.activate_torrent(&item).await?,
+                SourceKind::Magnet => self.activate_magnet(&item).await?,
+            }
         }
         Ok(())
     }
@@ -193,30 +221,54 @@ impl ServiceCore {
         self.activate_bytes(item, bytes).await
     }
 
+    async fn activate_magnet(&self, item: &StoredTorrent) -> anyhow::Result<()> {
+        let source = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .load_source(&item.id)?;
+        let magnet = std::str::from_utf8(&source)?;
+        let uri = sanitize_magnet_with_policy(magnet, self.policy)?.uri;
+        self.activate_source(
+            item,
+            AddTorrent::from_url(uri),
+            Some(Duration::from_secs(30)),
+        )
+        .await
+    }
+
     async fn activate_bytes(&self, item: &StoredTorrent, bytes: Vec<u8>) -> anyhow::Result<()> {
+        self.activate_source(item, AddTorrent::from_bytes(bytes), None)
+            .await
+    }
+
+    async fn activate_source(
+        &self,
+        item: &StoredTorrent,
+        source: AddTorrent<'_>,
+        deadline: Option<Duration>,
+    ) -> anyhow::Result<()> {
         if self.handles.lock().await.contains_key(&item.id) {
             return Ok(());
         }
         let torrent_root = Arc::new(self.root.subdir(&item.id)?);
-        let handle = self
-            .session
-            .add_torrent(
-                AddTorrent::from_bytes(bytes),
-                Some(AddTorrentOptions {
-                    overwrite: true,
-                    peer_limit: Some(50),
-                    storage_factory: Some(
-                        DurableStorageFactory::new(
-                            torrent_root,
-                            self.state.clone(),
-                            item.id.clone(),
-                        )
+        let pending = self.session.add_torrent(
+            source,
+            Some(AddTorrentOptions {
+                overwrite: true,
+                peer_limit: Some(50),
+                storage_factory: Some(
+                    DurableStorageFactory::new(torrent_root, self.state.clone(), item.id.clone())
                         .boxed(),
-                    ),
-                    ..Default::default()
-                }),
-            )
-            .await?
+                ),
+                ..Default::default()
+            }),
+        );
+        let result = match deadline {
+            Some(deadline) => tokio::time::timeout(deadline, pending).await??,
+            None => pending.await?,
+        };
+        let handle = result
             .into_handle()
             .ok_or_else(|| anyhow::anyhow!("engine did not return a torrent handle"))?;
         self.handles.lock().await.insert(item.id.clone(), handle);
