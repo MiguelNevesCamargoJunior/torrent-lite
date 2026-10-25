@@ -9,8 +9,8 @@ use crate::{
     state_store::{AddInput, DesiredState, SourceKind, StateStore, StoredTorrent},
 };
 use librqbit::{
-    AddTorrent, AddTorrentOptions, ConnectionOptions, ListenerOptions, Session, SessionOptions,
-    storage::StorageFactoryExt, torrent_state::ManagedTorrentHandle,
+    AddTorrent, AddTorrentOptions, ConnectionOptions, ListenerOptions, ManagedTorrent, Session,
+    SessionOptions, storage::StorageFactoryExt,
 };
 use std::{
     collections::HashMap,
@@ -27,7 +27,7 @@ pub struct ServiceCore {
     session: Arc<Session>,
     proxy: PolicyProxy,
     policy: DestinationPolicy,
-    handles: AsyncMutex<HashMap<String, ManagedTorrentHandle>>,
+    handles: AsyncMutex<HashMap<String, Arc<ManagedTorrent>>>,
     mutation: AsyncMutex<()>,
 }
 
