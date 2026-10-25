@@ -8,7 +8,7 @@ The approved design targets one download service with a CLI, a local browser UI 
 
 ## Development status
 
-The current foundation establishes input validation and an offline inspection CLI, plus an explicit compatibility/security gate for the proposed `librqbit` engine. A capability-scoped helper opens files inside a chosen root, and a feature-gated local-peer test exercises the engine. A feature-gated SQLite store persists torrent intent, tombstones and file identities; it can migrate its v1 schema after creating a backup. Downloading through the CLI, a running service, MCP and the web UI are subsequent milestones.
+The current foundation establishes input validation and an offline inspection CLI, plus an explicit compatibility/security gate for the proposed `librqbit` engine. A capability-scoped helper opens files inside a chosen root, and a feature-gated local-peer test exercises the engine. A feature-gated SQLite store persists torrent intent, tombstones and file identities; it can migrate its v1 schema after creating a backup. An experimental engine storage adapter uses those persisted identities and rechecks pieces on restart. Downloading through the CLI, a running service, MCP and the web UI are subsequent milestones.
 
 - [Design](docs/superpowers/specs/2026-10-25-torrent-design.md) (Portuguese)
 - [Initial implementation plan](docs/superpowers/plans/2026-10-25-foundation.md)
@@ -35,7 +35,7 @@ Inspect a local v1 metainfo file without starting a download:
 cargo run --locked -- inspect-torrent path/to/file.torrent --json
 ```
 
-The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The SQLite store persists those identities, but the engine adapter has not been connected to it yet. The local-peer experiment and store remain separate building blocks; there is no production network destination policy. Actual downloads through the CLI are not available yet.
+The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The experimental engine adapter now uses those persisted identities in a synthetic loopback test. There is no production network destination policy, process crash recovery or service orchestration yet. Actual downloads through the CLI are not available yet.
 
 ## License
 
