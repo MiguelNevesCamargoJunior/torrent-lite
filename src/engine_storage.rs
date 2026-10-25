@@ -117,6 +117,10 @@ impl DurableStorage {
 impl TorrentStorage for DurableStorage {
     fn init(&mut self, _: &ManagedTorrentShared, metadata: &TorrentMetadata) -> anyhow::Result<()> {
         anyhow::ensure!(self.files.is_empty(), "storage already initialized");
+        anyhow::ensure!(
+            !metadata.info.info().private,
+            "private torrents are not yet supported"
+        );
         anyhow::ensure!(metadata.file_infos.len() <= 10_000, "too many files");
         let paths = metadata
             .file_infos
