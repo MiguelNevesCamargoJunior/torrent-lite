@@ -2,6 +2,8 @@
 
 #[cfg(feature = "api-client")]
 pub mod api_client;
+#[cfg(feature = "browser-ui")]
+pub mod browser_ui;
 #[cfg(feature = "durable-engine")]
 pub mod engine_storage;
 #[cfg(feature = "local-api")]

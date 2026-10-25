@@ -76,9 +76,8 @@ fn failed() -> CallToolResult {
 impl McpServer {
     #[tool(description = "List torrents in the running local service")]
     async fn torrent_list(&self) -> CallToolResult {
-        let result =
-            async { serde_json::to_string(&self.client()?.list().await?).map_err(Into::into) }
-                .await;
+        let result: anyhow::Result<String> =
+            async { Ok(serde_json::to_string(&self.client()?.list().await?)?) }.await;
         result.map(ok).unwrap_or_else(|_| failed())
     }
 
@@ -87,13 +86,13 @@ impl McpServer {
         &self,
         Parameters(TorrentId { id }): Parameters<TorrentId>,
     ) -> CallToolResult {
-        let result = async {
+        let result: anyhow::Result<String> = async {
             let rows = self.client()?.list().await?;
             let row = rows
                 .iter()
                 .find(|row| row.id == id)
                 .ok_or_else(|| anyhow::anyhow!("not found"))?;
-            serde_json::to_string(row).map_err(Into::into)
+            Ok(serde_json::to_string(row)?)
         }
         .await;
         result.map(ok).unwrap_or_else(|_| failed())

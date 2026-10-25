@@ -2,13 +2,13 @@
 
 A lightweight, local-first BitTorrent client in Rust, designed for Windows and portable to Linux/macOS.
 
-**Early development. The download command is experimental; there are no releases or performance claims.**
+**Early development. Downloads and integrations are experimental; there are no releases or performance claims.**
 
 The approved design targets one download service with a CLI, a local browser UI and an MCP stdio adapter. No advertisements, bundled offers, telemetry or automatic execution of downloaded files.
 
 ## Development status
 
-The current foundation establishes input validation, an offline inspection CLI and a qualified `librqbit` engine. A capability-scoped helper opens files inside a chosen root. A feature-gated SQLite store persists torrent intent, tombstones and file identities; it can migrate its v1 schema after creating a backup. An experimental foreground service uses those identities, rechecks pieces on restart, and routes outbound TCP through a local authenticated policy proxy. Experimental CLI commands download local `.torrent` files and v1 magnets with HTTP(S) trackers. A loopback-only API and owner-scoped endpoint discovery support commands for adding, listing, pausing, resuming and removing torrents. An MCP server and web UI are subsequent milestones.
+The current foundation establishes input validation, an offline inspection CLI and a qualified `librqbit` engine. A capability-scoped helper opens files inside a chosen root. A feature-gated SQLite store persists torrent intent, tombstones and file identities; it can migrate its v1 schema after creating a backup. An experimental foreground service uses those identities, rechecks pieces on restart, and routes outbound TCP through a local authenticated policy proxy. Experimental CLI commands download local `.torrent` files and v1 magnets with HTTP(S) trackers. A loopback-only API and owner-scoped endpoint discovery support commands for adding, listing, pausing, resuming and removing torrents. An MCP stdio adapter and read-only local browser dashboard are now experimental.
 
 - [Design](docs/superpowers/specs/2026-10-25-torrent-design.md) (Portuguese)
 - [Initial implementation plan](docs/superpowers/plans/2026-10-25-foundation.md)
@@ -70,7 +70,21 @@ cargo run --locked --features api-client -- resume TORRENT_ID --state path/to/st
 cargo run --locked --features api-client -- remove TORRENT_ID --state path/to/state.db
 ```
 
-`add` accepts `--paused`. Removing a record preserves downloaded files. The MCP server and browser UI remain in development.
+`add` accepts `--paused`. Removing a record preserves downloaded files. For a local dashboard, leave the service running and start:
+
+```sh
+cargo run --locked --features browser-ui -- ui --state path/to/state.db
+```
+
+Open the local URL printed by `ui`. The dashboard refreshes every two seconds and contains no external resources. Closing `ui` does not stop downloads. The URL grants read-only access while that `ui` process runs, so treat it as private.
+
+For MCP clients that launch a stdio command:
+
+```sh
+cargo run --locked --features mcp -- mcp --state path/to/state.db --read-only
+```
+
+Omit `--read-only` to expose add-magnet, pause, resume and remove tools. Standard output is reserved for MCP protocol messages. The service must already be running.
 
 ## License
 

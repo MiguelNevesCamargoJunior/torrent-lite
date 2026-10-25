@@ -14,6 +14,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Show a read-only local dashboard in your browser.
+    #[cfg(feature = "browser-ui")]
+    Ui {
+        #[arg(long)]
+        state: std::path::PathBuf,
+    },
     /// Run the MCP stdio server for an already-running local service.
     #[cfg(feature = "mcp")]
     Mcp {
@@ -118,6 +124,8 @@ fn main() -> ExitCode {
         }
     };
     let output = match command {
+        #[cfg(feature = "browser-ui")]
+        Commands::Ui { state } => return run_ui(state),
         #[cfg(feature = "mcp")]
         Commands::Mcp { state, read_only } => return run_mcp(state, read_only),
         #[cfg(feature = "api-client")]
@@ -210,6 +218,29 @@ fn main() -> ExitCode {
             eprintln!("error: unable to write output");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(feature = "browser-ui")]
+fn run_ui(state: std::path::PathBuf) -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => return ExitCode::FAILURE,
+    };
+    let result = runtime.block_on(async {
+        let ui = torrent_lite::browser_ui::BrowserUi::bind(&state).await?;
+        println!("Open {}", ui.url());
+        tokio::signal::ctrl_c().await?;
+        Ok::<(), anyhow::Error>(())
+    });
+    if result.is_err() {
+        eprintln!("error: unable to start local dashboard");
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 

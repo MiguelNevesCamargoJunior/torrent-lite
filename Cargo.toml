@@ -18,6 +18,7 @@ service-core = ["secure-engine-qualification"]
 local-api = ["service-core", "dep:axum", "tokio/signal"]
 api-client = ["local-api", "dep:reqwest"]
 mcp = ["api-client", "dep:rmcp"]
+browser-ui = ["api-client"]
 
 [dependencies]
 anyhow = { version = "1.0", optional = true }
@@ -87,6 +88,10 @@ required-features = ["api-client"]
 [[test]]
 name = "mcp"
 required-features = ["mcp"]
+
+[[test]]
+name = "browser_ui"
+required-features = ["browser-ui"]
 
 [profile.release]
 lto = "thin"
