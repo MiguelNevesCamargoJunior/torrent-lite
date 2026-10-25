@@ -1,6 +1,7 @@
 use torrent_lite::{
     InputError,
-    network_input::{sanitize_magnet, sanitize_torrent},
+    network_input::{sanitize_magnet, sanitize_torrent, sanitize_torrent_with_policy},
+    network_policy::DestinationPolicy,
     torrent_file::inspect_torrent,
 };
 
@@ -71,4 +72,16 @@ fn torrent_rewrite_preserves_infohash_and_removes_udp_tracker() {
 fn private_torrent_fails_closed_before_engine_receives_it() {
     let input = metainfo(&["https://tracker.example.org/announce"], true);
     assert_eq!(sanitize_torrent(&input), Err(InputError::UnsupportedFormat));
+}
+
+#[test]
+fn explicit_lan_mode_can_retain_local_http_tracker() {
+    let input = metainfo(&["http://127.0.0.1:8080/announce"], false);
+    assert_eq!(sanitize_torrent(&input).unwrap().dropped_trackers, 1);
+    let local = sanitize_torrent_with_policy(&input, DestinationPolicy::AllowLan).unwrap();
+    assert_eq!(local.dropped_trackers, 0);
+    assert_eq!(
+        inspect_torrent(&local.bytes).unwrap().info_hash,
+        inspect_torrent(&input).unwrap().info_hash
+    );
 }

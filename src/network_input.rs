@@ -23,6 +23,13 @@ pub struct SanitizedTorrent {
 }
 
 pub fn sanitize_magnet(input: &str) -> Result<SanitizedMagnet, InputError> {
+    sanitize_magnet_with_policy(input, DestinationPolicy::PublicOnly)
+}
+
+pub fn sanitize_magnet_with_policy(
+    input: &str,
+    policy: DestinationPolicy,
+) -> Result<SanitizedMagnet, InputError> {
     let magnet = Magnet::parse(input)?;
     let source = Url::parse(input).map_err(|_| InputError::InvalidMagnet)?;
     let mut uri = Url::parse(&format!("magnet:?xt=urn:btih:{}", magnet.info_hash()))
@@ -37,7 +44,7 @@ pub fn sanitize_magnet(input: &str) -> Result<SanitizedMagnet, InputError> {
         if count > MAX_TRACKERS {
             return Err(InputError::TooLarge);
         }
-        match DestinationPolicy::PublicOnly.validate_tracker_url(&value) {
+        match policy.validate_tracker_url(&value) {
             Ok(tracker) => {
                 uri.query_pairs_mut().append_pair("tr", tracker.as_str());
             }
@@ -64,6 +71,13 @@ struct SafeMetainfo<'a> {
 }
 
 pub fn sanitize_torrent(input: &[u8]) -> Result<SanitizedTorrent, InputError> {
+    sanitize_torrent_with_policy(input, DestinationPolicy::PublicOnly)
+}
+
+pub fn sanitize_torrent_with_policy(
+    input: &[u8],
+    policy: DestinationPolicy,
+) -> Result<SanitizedTorrent, InputError> {
     let before = inspect_torrent(input)?;
     if before.private {
         return Err(InputError::UnsupportedFormat);
@@ -79,7 +93,7 @@ pub fn sanitize_torrent(input: &[u8]) -> Result<SanitizedTorrent, InputError> {
             dropped_trackers += 1;
             continue;
         };
-        match DestinationPolicy::PublicOnly.validate_tracker_url(tracker) {
+        match policy.validate_tracker_url(tracker) {
             Ok(url) => safe.push(url.to_string()),
             Err(_) => dropped_trackers += 1,
         }

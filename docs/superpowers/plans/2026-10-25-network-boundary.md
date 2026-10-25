@@ -12,6 +12,8 @@ The experimental proxy now implements SOCKS5 CONNECT with a 256-bit random passw
 
 Before public trackers are enabled, sanitize the magnet and metainfo supplied to the engine. Retain only validated HTTP(S) trackers and return the count of dropped trackers for a visible warning. A `.torrent` rewrite must preserve the raw `info` bytes and therefore the v1 infohash. Reject private torrents until their tracker isolation is proven. Keep metadata size and tracker count bounded. Validate the output again and assert the original hash remains unchanged. This is a preprocessing gate; the proxy still checks each concrete network destination and each redirect.
 
+Next qualification: a synthetic local HTTP tracker returns a loopback seeder. The leecher gets no initial peer list. The test succeeds only if the tracker announces and the peer data connection both traverse the authenticated proxy, while the persisted storage adapter receives the bytes. The LAN mode is explicit for this test; the default public policy still denies its loopback endpoints.
+
 Source of address classes: IANA IPv4 and IPv6 Special-Purpose Address Registries, consulted 2026-10-25. Update the policy when those registries change.
 
 - https://www.iana.org/assignments/iana-ipv4-special-registry/
