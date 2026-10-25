@@ -4,6 +4,8 @@ A lightweight, local-first BitTorrent client in Rust, designed for Windows and p
 
 **Early development. Downloads and integrations are experimental; there are no releases or performance claims.**
 
+Unsigned preview binaries can be built on demand by the [Experimental preview binaries workflow](https://github.com/MiguelNevesCamargoJunior/torrent-lite/actions/workflows/preview.yml). Download the artifact for your platform, verify its ZIP against `SHA256SUMS`, and read its `manifest.json` and dependency inventory. These are test builds, not stable releases; see the [preview build contract](docs/preview-build-spec.md).
+
 The approved design targets one download service with a CLI, a local browser UI and an MCP stdio adapter. No advertisements, bundled offers, telemetry or automatic execution of downloaded files.
 
 ## Development status

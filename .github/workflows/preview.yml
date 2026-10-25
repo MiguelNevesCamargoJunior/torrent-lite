@@ -1,0 +1,53 @@
+name: Experimental preview binaries
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Packaging tests
+        run: python -m unittest discover -s packaging-tests -v
+
+  build:
+    needs: package-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            platform: windows-x86_64
+            binary: target/release/torrent-lite.exe
+          - os: ubuntu-24.04
+            platform: linux-x86_64
+            binary: target/release/torrent-lite
+          - os: macos-15
+            platform: macos-arm64
+            binary: target/release/torrent-lite
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust
+        run: rustup toolchain install 1.91.1 --profile minimal
+      - name: Build CLI, service, MCP and dashboard
+        run: cargo +1.91.1 build --release --locked --features browser-ui,mcp
+      - name: Smoke test native binary
+        run: python tools/smoke_preview.py --binary ${{ matrix.binary }}
+      - name: Package unsigned preview
+        run: |
+          python -c "from pathlib import Path; Path('preview').mkdir(exist_ok=True)"
+          python tools/package_preview.py --binary ${{ matrix.binary }} --output preview --platform ${{ matrix.platform }} --commit ${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: torrent-lite-preview-${{ matrix.platform }}
+          path: preview/*
+          if-no-files-found: error
+          retention-days: 14

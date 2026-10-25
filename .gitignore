@@ -5,6 +5,8 @@
 /playwright-report/
 /.superpowers/
 *.log
+__pycache__/
+*.pyc
 .env
 .DS_Store
 
