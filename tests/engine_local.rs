@@ -1,9 +1,105 @@
 //! Qualification experiment: only synthetic files and loopback peers.
 use librqbit::{
     AddTorrent, AddTorrentOptions, CreateTorrentOptions, ListenerOptions, Session, SessionOptions,
+    storage::{StorageFactory, StorageFactoryExt, TorrentStorage},
 };
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use torrent_lite::safe_storage::SafeRoot;
+
+// Qualification adapter: new files only. It is intentionally unsuitable for
+// production restart until existing-file identity is persisted and checked.
+#[derive(Clone)]
+struct NewFileFactory(Arc<SafeRoot>);
+
+impl StorageFactory for NewFileFactory {
+    type Storage = NewFileStorage;
+
+    fn create(
+        &self,
+        _: &librqbit::ManagedTorrentShared,
+        _: &librqbit::TorrentMetadata,
+    ) -> anyhow::Result<Self::Storage> {
+        Ok(NewFileStorage {
+            root: self.0.clone(),
+            files: Vec::new(),
+        })
+    }
+
+    fn clone_box(&self) -> librqbit::storage::BoxStorageFactory {
+        self.clone().boxed()
+    }
+}
+
+struct NewFileStorage {
+    root: Arc<SafeRoot>,
+    files: Vec<Mutex<cap_std::fs::File>>,
+}
+
+impl TorrentStorage for NewFileStorage {
+    fn init(
+        &mut self,
+        _: &librqbit::ManagedTorrentShared,
+        metadata: &librqbit::TorrentMetadata,
+    ) -> anyhow::Result<()> {
+        for info in &metadata.file_infos {
+            let components: Vec<&str> = info
+                .relative_filename
+                .components()
+                .map(|part| {
+                    part.as_os_str()
+                        .to_str()
+                        .ok_or_else(|| anyhow::anyhow!("non-UTF8 file path"))
+                })
+                .collect::<anyhow::Result<_>>()?;
+            self.files
+                .push(Mutex::new(self.root.create_new(&components)?));
+        }
+        Ok(())
+    }
+
+    fn pread_exact(&self, file_id: usize, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
+        let mut file = self.files[file_id].lock().unwrap();
+        file.seek(SeekFrom::Start(offset))?;
+        file.read_exact(buf)?;
+        Ok(())
+    }
+
+    fn pwrite_all(&self, file_id: usize, offset: u64, buf: &[u8]) -> anyhow::Result<()> {
+        let mut file = self.files[file_id].lock().unwrap();
+        file.seek(SeekFrom::Start(offset))?;
+        file.write_all(buf)?;
+        Ok(())
+    }
+
+    fn remove_file(&self, _: usize, _: &Path) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn remove_directory_if_empty(&self, _: &Path) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn ensure_file_length(&self, file_id: usize, length: u64) -> anyhow::Result<()> {
+        self.files[file_id].lock().unwrap().set_len(length)?;
+        Ok(())
+    }
+
+    fn take(&self) -> anyhow::Result<Box<dyn TorrentStorage>> {
+        let files = self
+            .files
+            .iter()
+            .map(|file| Ok(Mutex::new(file.lock().unwrap().try_clone()?)))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(Box::new(Self {
+            root: self.root.clone(),
+            files,
+        }))
+    }
+}
 
 fn isolated_options() -> SessionOptions {
     SessionOptions {
@@ -58,6 +154,9 @@ async fn transfers_a_synthetic_file_between_local_sessions() {
             Some(AddTorrentOptions {
                 initial_peers: Some(vec![peer]),
                 peer_limit: Some(2),
+                storage_factory: Some(
+                    NewFileFactory(Arc::new(SafeRoot::open(&destination).unwrap())).boxed(),
+                ),
                 ..Default::default()
             }),
         )
