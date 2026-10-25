@@ -120,6 +120,35 @@ fn one_process_owns_the_state_database_at_a_time() {
 }
 
 #[test]
+fn second_process_cannot_open_the_owned_database() {
+    let workspace = tempfile::tempdir().unwrap();
+    let database = workspace.path().join("state.db");
+    let first = StateStore::open(&database).unwrap();
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "lock_child"])
+        .env("TORRENT_LITE_LOCK_CHILD", &database)
+        .output()
+        .unwrap();
+    assert!(
+        child.status.success(),
+        "{}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    drop(first);
+    assert!(StateStore::open(&database).is_ok());
+}
+
+#[test]
+fn lock_child() {
+    if let Some(database) = std::env::var_os("TORRENT_LITE_LOCK_CHILD") {
+        assert!(matches!(
+            StateStore::open(&std::path::PathBuf::from(database)),
+            Err(StoreError::Busy)
+        ));
+    }
+}
+
+#[test]
 fn metadata_and_registration_count_are_bounded() {
     let workspace = tempfile::tempdir().unwrap();
     let root = workspace.path().join("downloads");
