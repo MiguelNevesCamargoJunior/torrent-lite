@@ -39,6 +39,7 @@ cargo run --locked -- inspect-torrent path/to/file.torrent --json
 ```
 
 The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The feature-gated service passed synthetic pause, restart, tracker download, selected-file transfer and bounded seeding tests on Windows, Linux and macOS. A forced process stop test covers paused addition and removal; crash injection at every mutation, low-disk behavior and public swarm performance qualification are pending.
+Subprocess tests now also stop the state-store test binary immediately before four SQLite commits and verify rollback after reopening on all three systems. This covers registration, running intent, removal and file identity; see the [crash consistency contract](docs/crash-consistency-spec.md). Service and migration crash points remain open.
 
 ## Experimental foreground download
 

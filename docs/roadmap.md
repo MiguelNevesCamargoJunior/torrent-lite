@@ -15,6 +15,7 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 - [x] Optional bounded seeding slots with a configured peer capacity ceiling, qualified with local transfers and restart recheck.
 - [x] Private v1 `.torrent` support with one policy-filtered HTTP(S) tracker, tested with a local transfer and restart recheck.
 - [x] Forced process stop after paused addition and removal retains intent and tombstones on restart.
+- [x] Kill a test subprocess before four state transaction commits and verify rollback and lock release on all three operating systems.
 
 ## Required before a stable release
 
