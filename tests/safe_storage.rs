@@ -108,6 +108,7 @@ fn rejects_parent_symlink_outside_root() {
     std::os::unix::fs::symlink(&outside, root_path.join("linked")).unwrap();
     let root = SafeRoot::open(&root_path).unwrap();
     assert!(root.create_new(&["linked", "escape.bin"]).is_err());
+    assert!(root.subdir("linked").is_err());
     let outside_root = SafeRoot::open(&outside).unwrap();
     let outside_file = outside_root.create_new(&["present.bin"]).unwrap();
     let identity = FileIdentity::from_file(&outside_file).unwrap();
@@ -157,6 +158,7 @@ fn rejects_parent_junction_outside_root() {
     );
     let root = SafeRoot::open(&root_path).unwrap();
     assert!(root.create_new(&["linked", "escape.bin"]).is_err());
+    assert!(root.subdir("linked").is_err());
     let outside_root = SafeRoot::open(&outside).unwrap();
     let outside_file = outside_root.create_new(&["present.bin"]).unwrap();
     let identity = FileIdentity::from_file(&outside_file).unwrap();

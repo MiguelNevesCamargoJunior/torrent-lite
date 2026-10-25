@@ -3,7 +3,7 @@
 use crate::path_policy::validate_components;
 #[cfg(unix)]
 use cap_fs_ext::MetadataExt;
-use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::{
     ambient_authority,
     fs::{Dir, File, OpenOptions},
@@ -130,7 +130,7 @@ impl SafeRoot {
             ));
         }
         Ok(Self {
-            dir: self.dir.open_dir(name)?,
+            dir: self.dir.open_dir_nofollow(name)?,
         })
     }
 
@@ -152,9 +152,8 @@ impl SafeRoot {
                     "directory link is not allowed",
                 ));
             }
-            // cap-std resolves against this handle and rejects an escape if a directory
-            // is replaced between the metadata check and this open.
-            parent = parent.open_dir(name)?;
+            // Reject a link even if it replaces the directory after the metadata check.
+            parent = parent.open_dir_nofollow(name)?;
         }
         let mut options = OpenOptions::new();
         options.read(true).write(true).create_new(true);
