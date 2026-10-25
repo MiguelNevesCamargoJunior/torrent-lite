@@ -574,6 +574,25 @@ async fn completed_download_releases_queue_slot_and_seeding_is_bounded() {
     )
     .await
     .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            reopened.tick_queue().await.unwrap();
+            if reopened
+                .metrics(&first.id)
+                .await
+                .is_some_and(|metrics| metrics.finished)
+                && reopened
+                    .metrics(&second.id)
+                    .await
+                    .is_some_and(|metrics| metrics.finished)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("completed torrents were not revalidated after restart");
     reopened.tick_queue().await.unwrap();
     assert!(reopened.metrics(&first.id).await.unwrap().finished);
     assert!(reopened.metrics(&second.id).await.unwrap().finished);
