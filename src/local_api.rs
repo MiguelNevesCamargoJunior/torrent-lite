@@ -204,6 +204,7 @@ async fn list(
     for item in records {
         let metrics = state.service.metrics(&item.id).await;
         let failure = state.service.activation_failure(&item.id).await;
+        let resolving = state.service.is_resolving_magnet(&item.id).await;
         output.push(TorrentView {
             id: item.id,
             info_hash: item.info_hash,
@@ -225,6 +226,7 @@ async fn list(
                 .as_ref()
                 .map(|value| value.observed_state.clone())
                 .or_else(|| failure.map(|_| "retrying".to_owned()))
+                .or_else(|| resolving.then(|| "resolving".to_owned()))
                 .or_else(|| (item.desired == DesiredState::Running).then(|| "queued".to_owned())),
             error_code: failure.map(|(code, _)| code.to_owned()),
             retry_after_secs: failure.map(|(_, seconds)| seconds),

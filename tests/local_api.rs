@@ -1,7 +1,7 @@
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+    net::{TcpListener, TcpStream},
 };
 use torrent_lite::{
     local_api::LocalApi,
@@ -138,6 +138,43 @@ async fn activation_failure_has_a_safe_machine_readable_state() {
     service.pause(&item.id).await.unwrap();
     let paused = request(api.local_addr(), &headers).await;
     assert!(paused.contains("\"error_code\":null"));
+    drop(api);
+    service.stop().await;
+}
+
+#[tokio::test]
+async fn pending_magnet_reports_resolution_without_claiming_download_progress() {
+    let workspace = tempfile::tempdir().unwrap();
+    let output = workspace.path().join("download");
+    std::fs::create_dir(&output).unwrap();
+    let tracker = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let tracker_url = format!("http://{}/announce", tracker.local_addr().unwrap());
+    let service = Arc::new(
+        ServiceCore::open(
+            &workspace.path().join("state.db"),
+            &output,
+            DestinationPolicy::AllowLan,
+        )
+        .await
+        .unwrap(),
+    );
+    let magnet =
+        format!("magnet:?xt=urn:btih:0000000000000000000000000000000000000001&tr={tracker_url}");
+    let item = service.add_magnet(&magnet).await.unwrap();
+    service.tick_queue().await.unwrap();
+    let api = LocalApi::bind(service.clone()).await.unwrap();
+    let headers = format!(
+        "Host: {}\r\nAuthorization: Bearer {}\r\n",
+        api.local_addr(),
+        api.token()
+    );
+    let resolving = request(api.local_addr(), &headers).await;
+    assert!(resolving.contains("\"observed_state\":\"resolving\""));
+    assert!(resolving.contains("\"progress_bytes\":null"));
+    assert!(resolving.contains("\"error_code\":null"));
+    service.pause(&item.id).await.unwrap();
+    let paused = request(api.local_addr(), &headers).await;
+    assert!(paused.contains("\"observed_state\":null"));
     drop(api);
     service.stop().await;
 }

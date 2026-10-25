@@ -277,6 +277,10 @@ impl ServiceCore {
             .map(|failure| ("activation_failed", failure.retry_after_secs()))
     }
 
+    pub async fn is_resolving_magnet(&self, id: &str) -> bool {
+        self.pending_magnets.lock().await.contains_key(id)
+    }
+
     pub async fn add_torrent(&self, bytes: &[u8], paused: bool) -> anyhow::Result<StoredTorrent> {
         let _guard = self.mutation.lock().await;
         sanitize_torrent_with_policy(bytes, self.policy)?;
