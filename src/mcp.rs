@@ -26,7 +26,6 @@ struct AddMagnet {
 pub struct McpServer {
     state: PathBuf,
     read_only: bool,
-    #[expect(dead_code, reason = "tool_handler macro accesses this router field")]
     tool_router: ToolRouter<Self>,
 }
 
@@ -173,7 +172,7 @@ impl McpServer {
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())

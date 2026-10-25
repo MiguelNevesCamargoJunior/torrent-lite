@@ -60,8 +60,8 @@ jobs:
         run: cargo +1.91.1 test --locked --features local-api --test service_discovery
       - name: Shared service client
         run: cargo +1.91.1 test --locked --features api-client --test api_client
-      - name: MCP stdio protocol
-        run: cargo +1.91.1 test --locked --features mcp --test mcp
       - name: Browser dashboard security
         run: cargo +1.91.1 test --locked --features browser-ui --test browser_ui
+      - name: MCP stdio protocol
+        run: cargo +1.91.1 test --locked --features mcp --test mcp
 

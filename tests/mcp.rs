@@ -21,6 +21,7 @@ fn read_only_stdio_server_advertises_only_read_tools() {
             serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}),
             serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
             serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+            serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"torrent_remove","arguments":{"id":"00000000-0000-0000-0000-000000000001"}}}),
         ] {
             writeln!(stdin, "{message}").unwrap();
         }
@@ -45,4 +46,6 @@ fn read_only_stdio_server_advertises_only_read_tools() {
     assert!(names.contains(&"torrent_list"));
     assert!(!names.contains(&"torrent_remove"));
     assert!(!names.contains(&"torrent_add_magnet"));
+    let refused = messages.iter().find(|message| message["id"] == 3).unwrap();
+    assert!(refused["error"].is_object() || refused["result"]["isError"] == true);
 }
