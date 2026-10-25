@@ -701,7 +701,8 @@ impl StateStore {
 #[cfg(test)]
 mod crash_tests {
     use super::{AddInput, DesiredState, FileIdentity, StateStore};
-    use std::{fs::File, process::Command};
+    use crate::safe_storage::SafeRoot;
+    use std::{io::Write, process::Command};
 
     const MAGNET: &str = "magnet:?xt=urn:btih:0000000000000000000000000000000000000001";
 
@@ -734,7 +735,11 @@ mod crash_tests {
                     .unwrap();
             }
             "file_identity" => {
-                let file = File::open(root.join("piece.bin")).unwrap();
+                let mut file = SafeRoot::open(&root)
+                    .unwrap()
+                    .create_new(&["piece.bin"])
+                    .unwrap();
+                file.write_all(b"data").unwrap();
                 let identity = FileIdentity::from_file(&file).unwrap();
                 store
                     .record_file_identity(
@@ -756,7 +761,6 @@ mod crash_tests {
             let workspace = tempfile::tempdir().unwrap();
             let root = workspace.path().join("downloads");
             std::fs::create_dir(&root).unwrap();
-            std::fs::write(root.join("piece.bin"), b"data").unwrap();
             let database = workspace.path().join("state.db");
             let id = if case == "register" {
                 drop(StateStore::open(&database).unwrap());
