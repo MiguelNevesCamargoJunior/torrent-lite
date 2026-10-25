@@ -87,7 +87,7 @@ cargo run --locked --features api-client -- remove TORRENT_ID --state path/to/st
 cargo run --locked --features browser-ui -- ui --state path/to/state.db
 ```
 
-Open the local URL printed by `ui`. The dashboard refreshes every two seconds, shows verified progress and available engine speed/peer estimates, and lets you add magnets or `.torrent` files, pause, resume, verify and remove records. Removing a record preserves downloaded files. Unknown values appear as unavailable. Closing `ui` does not stop downloads. The URL gives access to local controls while the `ui` process runs, so treat it as private. Browser mutations require a separate temporary CSRF token and exact same-origin requests; see [UI security design](docs/ui-plan.md).
+Open the local URL printed by `ui`. The dashboard refreshes every two seconds, shows verified progress and available engine speed/peer estimates, and lets you add magnets or `.torrent` files, choose files while paused, pause, resume, verify and remove records. Removing a record preserves downloaded files. Unknown values appear as unavailable. Closing `ui` does not stop downloads. The URL gives access to local controls while the `ui` process runs, so treat it as private. Browser mutations require a separate temporary CSRF token and exact same-origin requests; see [UI security design](docs/ui-plan.md).
 
 For MCP clients that launch a stdio command:
 

@@ -8,6 +8,7 @@ Toda resposta não bem-sucedida de `/api/v1` usa JSON `{ "error": { "code": "...
 | 401 | `unauthorized` | token ausente ou errado |
 | 403 | `forbidden` | Host ou Origin recusado |
 | 404 | `not_found` | registro ou rota ausente |
+| 409 | `conflict` | seleção de arquivos indisponível, inválida ou torrent não pausado |
 | 408 | `request_timeout` | corpo de requisição demorou demais |
 | 413 | `payload_too_large` | entrada acima do limite |
 | 415 | `unsupported_media_type` | tipo de corpo não aceito |
