@@ -101,10 +101,10 @@ fn authorize(headers: &HeaderMap, state: &ApiState) -> Result<(), StatusCode> {
     if host != Some(state.host.as_ref()) {
         return Err(StatusCode::FORBIDDEN);
     }
-    if let Some(origin) = headers.get(ORIGIN) {
-        if origin.to_str().ok() != Some(state.origin.as_ref()) {
-            return Err(StatusCode::FORBIDDEN);
-        }
+    if let Some(origin) = headers.get(ORIGIN)
+        && origin.to_str().ok() != Some(state.origin.as_ref())
+    {
+        return Err(StatusCode::FORBIDDEN);
     }
     let value = headers
         .get(AUTHORIZATION)
