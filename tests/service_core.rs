@@ -785,7 +785,10 @@ async fn private_torrent_survives_reopen_and_repairs_verified_data() {
     let magnet_download = workspace.path().join("magnet-download");
     std::fs::create_dir(&magnet_download).unwrap();
     let magnet_database = workspace.path().join("magnet-state.db");
-    let magnet = format!("magnet:?xt=urn:btih:{}&tr={tracker_url}", item.info_hash);
+    let public_hash = torrent_lite::torrent_file::inspect_torrent(&raw)
+        .unwrap()
+        .info_hash;
+    let magnet = format!("magnet:?xt=urn:btih:{public_hash}&tr={tracker_url}");
     let service = ServiceCore::open(
         &magnet_database,
         &magnet_download,
