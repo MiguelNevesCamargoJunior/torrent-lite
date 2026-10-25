@@ -72,7 +72,7 @@ cargo run --locked --features api-client -- verify TORRENT_ID --state path/to/st
 cargo run --locked --features api-client -- remove TORRENT_ID --state path/to/state.db
 ```
 
-`add` accepts `--paused`. `verify` fully rechecks registered `.torrent` data and restores the prior pause/running intent; magnet-only records do not yet support explicit verification until metainfo persistence is complete. Removing a record preserves downloaded files. For a local dashboard, leave the service running and start:
+`add` accepts `--paused`. `verify` fully rechecks registered `.torrent` data and magnets whose metainfo has resolved, then restores the prior pause/running intent. Resolved magnet metainfo is cached in the state database so a restarted service can recheck without recontacting a tracker. Removing a record preserves downloaded files. For a local dashboard, leave the service running and start:
 
 ```sh
 cargo run --locked --features browser-ui -- ui --state path/to/state.db

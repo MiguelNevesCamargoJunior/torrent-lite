@@ -13,7 +13,7 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 
 ## Required before a stable release
 
-- [ ] Store validated resolved metainfo for magnets so restart and explicit verification do not depend on a tracker being online.
+- [x] Store validated resolved metainfo for magnets so restart and explicit verification do not depend on a tracker being online, subject to CI qualification.
 - [ ] Complete lifecycle controls: start/stop/status, queueing, concurrency and bandwidth limits, selected files, seeding policy.
 - [ ] Expand browser UI to add, pause, resume and verify through a session handshake with CSRF protection; add keyboard and browser tests.
 - [ ] Show measured speed, peers, error states and ETA without inventing values; provide machine-readable API errors.

@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const APPLICATION_ID: i64 = 0x746c6974;
 const MAX_TORRENTS: i64 = 100;
 const MAX_SOURCE_BYTES: i64 = 8 * 1024 * 1024;
@@ -31,6 +31,10 @@ const CREATE_FILE_IDENTITIES_SQL: &str = "CREATE TABLE file_identities (
                     length INTEGER NOT NULL CHECK(length >= 0),
                     identity BLOB NOT NULL CHECK(length(identity) = 24),
                     PRIMARY KEY(torrent_id, file_index)
+                )";
+const CREATE_RESOLVED_METAINFO_SQL: &str = "CREATE TABLE resolved_metainfo (
+                    torrent_id TEXT PRIMARY KEY NOT NULL REFERENCES torrents(id),
+                    metainfo BLOB NOT NULL CHECK(length(metainfo) BETWEEN 1 AND 8388608)
                 )";
 
 fn matches_schema(
@@ -192,12 +196,12 @@ impl StateStore {
             {
                 return Err(StoreError::UnsupportedSchema);
             }
-            if version == 1 {
+            if version < SCHEMA_VERSION {
                 let mut backup_name = path
                     .file_name()
                     .ok_or(StoreError::UnsupportedSchema)?
                     .to_os_string();
-                backup_name.push(".v1.bak");
+                backup_name.push(format!(".v{version}.bak"));
                 let backup_path = path.with_file_name(backup_name);
                 match backup_path.symlink_metadata() {
                     Ok(_) => return Err(StoreError::MigrationBackupExists),
@@ -209,19 +213,29 @@ impl StateStore {
                 connection.execute("VACUUM INTO ?1", [backup_path])?;
                 let transaction =
                     connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                if version == 1 {
+                    transaction.execute_batch(&format!("{CREATE_FILE_IDENTITIES_SQL};"))?;
+                }
                 transaction.execute_batch(&format!(
-                    "{CREATE_FILE_IDENTITIES_SQL}; PRAGMA user_version = {SCHEMA_VERSION};"
+                    "{CREATE_RESOLVED_METAINFO_SQL}; PRAGMA user_version = {SCHEMA_VERSION};"
                 ))?;
                 transaction.commit()?;
             }
             if !matches_schema(&connection, "file_identities", CREATE_FILE_IDENTITIES_SQL)? {
                 return Err(StoreError::UnsupportedSchema);
             }
+            if !matches_schema(
+                &connection,
+                "resolved_metainfo",
+                CREATE_RESOLVED_METAINFO_SQL,
+            )? {
+                return Err(StoreError::UnsupportedSchema);
+            }
         } else {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute_batch(&format!(
-                "{CREATE_TORRENTS_SQL}; {CREATE_FILE_IDENTITIES_SQL}; PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {SCHEMA_VERSION};"
+                "{CREATE_TORRENTS_SQL}; {CREATE_FILE_IDENTITIES_SQL}; {CREATE_RESOLVED_METAINFO_SQL}; PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {SCHEMA_VERSION};"
             ))?;
             transaction.commit()?;
         }
@@ -401,6 +415,66 @@ impl StateStore {
             [id],
             |row| row.get(0),
         )?)
+    }
+
+    pub fn store_resolved_metainfo(&mut self, id: &str, metainfo: &[u8]) -> Result<(), StoreError> {
+        if metainfo.is_empty() || metainfo.len() > MAX_SOURCE_BYTES as usize {
+            return Err(StoreError::Input(InputError::TooLarge));
+        }
+        let parsed = inspect_torrent(metainfo)?;
+        let record: Option<(String, String)> = self
+            .connection
+            .query_row(
+                "SELECT info_hash,source_kind FROM torrents WHERE id=?1 AND tombstone=0",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let (info_hash, kind) = record.ok_or(StoreError::NotFound)?;
+        if kind != "magnet" || parsed.info_hash != info_hash {
+            return Err(StoreError::Conflict);
+        }
+        self.connection.execute(
+            "INSERT INTO resolved_metainfo(torrent_id,metainfo) VALUES (?1,?2)
+             ON CONFLICT(torrent_id) DO UPDATE SET metainfo=excluded.metainfo",
+            params![id, metainfo],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_resolved_metainfo(&self, id: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        let info_hash: String = self.connection.query_row(
+            "SELECT info_hash FROM torrents WHERE id=?1 AND source_kind='magnet' AND tombstone=0",
+            [id], |row| row.get(0),
+        ).optional()?.ok_or(StoreError::NotFound)?;
+        let length: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT length(metainfo) FROM resolved_metainfo WHERE torrent_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(length) = length else {
+            return Ok(None);
+        };
+        if !(1..=MAX_SOURCE_BYTES).contains(&length) {
+            return Err(StoreError::Corrupt);
+        }
+        let bytes: Vec<u8> = self.connection.query_row(
+            "SELECT metainfo FROM resolved_metainfo WHERE torrent_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        if inspect_torrent(&bytes)
+            .map(|item| item.info_hash)
+            .ok()
+            .as_deref()
+            != Some(info_hash.as_str())
+        {
+            return Err(StoreError::Corrupt);
+        }
+        Ok(Some(bytes))
     }
 
     pub fn record_file_identity(

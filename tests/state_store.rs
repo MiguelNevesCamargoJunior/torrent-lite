@@ -191,6 +191,60 @@ fn v1_torrent_bytes_are_registered_and_restored() {
 }
 
 #[test]
+fn resolved_magnet_metainfo_requires_matching_hash_and_survives_reopen() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().join("downloads");
+    std::fs::create_dir(&root).unwrap();
+    let mut bytes = b"d4:infod6:lengthi4e4:name8:file.txt12:piece lengthi4e6:pieces20:".to_vec();
+    bytes.extend([0_u8; 20]);
+    bytes.extend(b"ee");
+    let info_hash = torrent_lite::torrent_file::inspect_torrent(&bytes)
+        .unwrap()
+        .info_hash;
+    let database = workspace.path().join("state.db");
+    let source = format!("magnet:?xt=urn:btih:{info_hash}");
+    let id = {
+        let mut store = StateStore::open(&database).unwrap();
+        let item = store
+            .register(AddInput::Magnet(&source), &root, true)
+            .unwrap();
+        store.store_resolved_metainfo(&item.id, &bytes).unwrap();
+        item.id
+    };
+    let mut store = StateStore::open(&database).unwrap();
+    assert_eq!(store.load_resolved_metainfo(&id).unwrap().unwrap(), bytes);
+    let wrong = store
+        .register(AddInput::Magnet(&magnet(888)), &root, true)
+        .unwrap();
+    assert!(matches!(
+        store.store_resolved_metainfo(&wrong.id, &bytes),
+        Err(StoreError::Conflict)
+    ));
+}
+
+#[test]
+fn v2_migration_adds_resolved_metadata_table_with_backup() {
+    let workspace = tempfile::tempdir().unwrap();
+    let database = workspace.path().join("state.db");
+    drop(StateStore::open(&database).unwrap());
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute_batch("DROP TABLE resolved_metainfo; PRAGMA user_version=2;")
+        .unwrap();
+    drop(connection);
+    drop(StateStore::open(&database).unwrap());
+    let backup = workspace.path().join("state.db.v2.bak");
+    assert!(backup.exists());
+    let connection = rusqlite::Connection::open(&backup).unwrap();
+    assert_eq!(
+        connection
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+}
+
+#[test]
 fn file_identity_survives_reopen_and_refuses_conflicting_replacement() {
     let workspace = tempfile::tempdir().unwrap();
     let root_path = workspace.path().join("downloads");

@@ -161,6 +161,7 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     );
     service.stop().await;
     drop(service);
+    tracker_task.abort();
     let service = ServiceCore::open(
         &magnet_database,
         &magnet_download,
@@ -169,7 +170,7 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     .await
     .unwrap();
     assert_eq!(service.list().unwrap().len(), 1);
+    service.verify(&magnet_item.id).await.unwrap();
     service.stop().await;
-    tracker_task.abort();
     seeder.stop().await;
 }

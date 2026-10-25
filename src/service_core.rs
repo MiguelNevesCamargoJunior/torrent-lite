@@ -198,22 +198,25 @@ impl ServiceCore {
             .into_iter()
             .find(|item| item.id == id)
             .ok_or_else(|| anyhow::anyhow!("torrent not found"))?;
-        anyhow::ensure!(
-            item.source_kind == SourceKind::Torrent,
-            "magnet verification awaits persisted metainfo"
-        );
+        let source = {
+            let store = self
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            match item.source_kind {
+                SourceKind::Torrent => store.load_source(id)?,
+                SourceKind::Magnet => store
+                    .load_resolved_metainfo(id)?
+                    .ok_or_else(|| anyhow::anyhow!("magnet metadata has not resolved"))?,
+            }
+        };
+        let bytes = sanitize_torrent_with_policy(&source, self.policy)?.bytes;
         if let Some(handle) = self.handles.lock().await.get(id).cloned() {
             self.session
                 .delete(TorrentIdOrHash::Id(handle.id()), false)
                 .await?;
             self.handles.lock().await.remove(id);
         }
-        let source = self
-            .state
-            .lock()
-            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
-            .load_source(id)?;
-        let bytes = sanitize_torrent_with_policy(&source, self.policy)?.bytes;
         self.activate_source(&item, AddTorrent::from_bytes(bytes), None, true)
             .await?;
         if item.desired == DesiredState::Running
@@ -267,6 +270,15 @@ impl ServiceCore {
     }
 
     async fn activate_magnet(&self, item: &StoredTorrent) -> anyhow::Result<()> {
+        let cached = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .load_resolved_metainfo(&item.id)?;
+        if let Some(bytes) = cached {
+            let bytes = sanitize_torrent_with_policy(&bytes, self.policy)?.bytes;
+            return self.activate_bytes(item, bytes).await;
+        }
         let source = self
             .state
             .lock()
@@ -319,6 +331,25 @@ impl ServiceCore {
         let handle = result
             .into_handle()
             .ok_or_else(|| anyhow::anyhow!("engine did not return a torrent handle"))?;
+        if item.source_kind == SourceKind::Magnet {
+            let metainfo = handle.with_metadata(|metadata| metadata.torrent_bytes.to_vec())?;
+            let validated = sanitize_torrent_with_policy(&metainfo, self.policy);
+            let stored = match validated {
+                Ok(value) => self
+                    .state
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+                    .store_resolved_metainfo(&item.id, &value.bytes)
+                    .map_err(anyhow::Error::from),
+                Err(error) => Err(anyhow::Error::from(error)),
+            };
+            if let Err(error) = stored {
+                self.session
+                    .delete(TorrentIdOrHash::Id(handle.id()), false)
+                    .await?;
+                return Err(error);
+            }
+        }
         self.handles.lock().await.insert(item.id.clone(), handle);
         Ok(())
     }
