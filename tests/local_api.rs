@@ -2,6 +2,7 @@ use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    task::JoinSet,
 };
 use torrent_lite::{
     local_api::LocalApi,
@@ -213,6 +214,68 @@ async fn add_rejects_unauthorized_body_and_registers_paused_magnet() {
     assert!(listed.contains("\"download_bytes_per_sec\":null"));
     drop(api);
     service.stop().await;
+}
+
+#[tokio::test]
+async fn concurrent_api_clients_register_each_info_hash_once_and_survive_restart() {
+    let workspace = tempfile::tempdir().unwrap();
+    let output = workspace.path().join("download");
+    std::fs::create_dir(&output).unwrap();
+    let database = workspace.path().join("state.db");
+    let service = Arc::new(
+        ServiceCore::open(&database, &output, DestinationPolicy::PublicOnly)
+            .await
+            .unwrap(),
+    );
+    let api = LocalApi::bind(service.clone()).await.unwrap();
+    let addr = api.local_addr();
+    let headers = format!(
+        "Host: {addr}\r\nContent-Type: application/json\r\nAuthorization: Bearer {}\r\n",
+        api.token()
+    );
+    let mut clients = JoinSet::new();
+    for index in 0..16 {
+        let headers = headers.clone();
+        clients.spawn(async move {
+            let hash = if index < 8 { 1 } else { index };
+            let body = format!(
+                "{{\"magnet\":\"magnet:?xt=urn:btih:{hash:040x}&tr=https://tracker.example/announce\",\"paused\":true}}"
+            );
+            request_body(addr, "POST", "/api/v1/torrents", &headers, &body).await
+        });
+    }
+    let responses = tokio::time::timeout(Duration::from_secs(15), async {
+        let mut output = Vec::new();
+        while let Some(result) = clients.join_next().await {
+            output.push(result.unwrap());
+        }
+        output
+    })
+    .await
+    .expect("concurrent clients did not finish");
+    assert_eq!(responses.len(), 16);
+    for response in &responses {
+        assert!(response.starts_with("HTTP/1.1 201"), "{response}");
+    }
+    let records = service.list().unwrap();
+    assert_eq!(records.len(), 9);
+    let duplicate = records
+        .iter()
+        .find(|item| item.info_hash == format!("{:040x}", 1))
+        .unwrap();
+    let id_field = format!("\"id\":\"{}\"", duplicate.id);
+    assert_eq!(
+        responses
+            .iter()
+            .filter(|response| response.contains(&id_field))
+            .count(),
+        8
+    );
+    api.close().await;
+    service.stop().await;
+    drop(service);
+    let reopened = StateStore::open(&database).unwrap();
+    assert_eq!(reopened.recover().unwrap().len(), 9);
 }
 
 #[tokio::test]

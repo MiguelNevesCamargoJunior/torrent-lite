@@ -17,6 +17,7 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 - [x] Forced process stop after paused addition and removal retains intent and tombstones on restart.
 - [x] Kill a test subprocess before four state transaction commits and verify rollback and lock release on all three operating systems.
 - [x] Exercise interrupted v3→v4 migration before commit: retain the old database and backup, and refuse to overwrite the backup on reopen, subject to CI qualification.
+- [x] Register duplicate and distinct torrents from simultaneous authenticated HTTP clients, then verify the persisted count on reopen, subject to CI qualification.
 
 ## Required before a stable release
 
