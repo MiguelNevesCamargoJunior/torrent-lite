@@ -8,7 +8,7 @@ The approved design targets one download service with a CLI, a local browser UI 
 
 ## Development status
 
-The current foundation establishes input validation, an offline inspection CLI and a qualified `librqbit` engine. A capability-scoped helper opens files inside a chosen root. A feature-gated SQLite store persists torrent intent, tombstones and file identities; it can migrate its v1 schema after creating a backup. An experimental foreground service uses those identities, rechecks pieces on restart, and routes outbound TCP through a local authenticated policy proxy. Experimental CLI commands download local `.torrent` files and v1 magnets with HTTP(S) trackers. A loopback-only API and owner-scoped endpoint discovery are under qualification; an MCP server and web UI are subsequent milestones.
+The current foundation establishes input validation, an offline inspection CLI and a qualified `librqbit` engine. A capability-scoped helper opens files inside a chosen root. A feature-gated SQLite store persists torrent intent, tombstones and file identities; it can migrate its v1 schema after creating a backup. An experimental foreground service uses those identities, rechecks pieces on restart, and routes outbound TCP through a local authenticated policy proxy. Experimental CLI commands download local `.torrent` files and v1 magnets with HTTP(S) trackers. A loopback-only API and owner-scoped endpoint discovery support commands for adding, listing, pausing, resuming and removing torrents. An MCP server and web UI are subsequent milestones.
 
 - [Design](docs/superpowers/specs/2026-10-25-torrent-design.md) (Portuguese)
 - [Initial implementation plan](docs/superpowers/plans/2026-10-25-foundation.md)
@@ -59,7 +59,18 @@ The experimental foreground service can also be started separately with:
 cargo run --locked --features local-api -- serve --output path/to/downloads --state path/to/state.db
 ```
 
-It listens only on `127.0.0.1`, publishes a protected endpoint record beside the state database, and stops on Ctrl+C. CLI commands that control this running service, MCP and the browser UI are still in development.
+It listens only on `127.0.0.1`, publishes a protected endpoint record beside the state database, and stops on Ctrl+C. In another terminal, use the same state database path:
+
+```sh
+cargo run --locked --features api-client -- add "magnet:?xt=urn:btih:HASH&tr=https%3A%2F%2Ftracker.example%2Fannounce" --state path/to/state.db
+cargo run --locked --features api-client -- add path/to/file.torrent --state path/to/state.db
+cargo run --locked --features api-client -- list --state path/to/state.db
+cargo run --locked --features api-client -- pause TORRENT_ID --state path/to/state.db
+cargo run --locked --features api-client -- resume TORRENT_ID --state path/to/state.db
+cargo run --locked --features api-client -- remove TORRENT_ID --state path/to/state.db
+```
+
+`add` accepts `--paused`. Removing a record preserves downloaded files. The MCP server and browser UI remain in development.
 
 ## License
 
