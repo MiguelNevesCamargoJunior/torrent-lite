@@ -23,6 +23,8 @@ thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"], optional = true }
 unicode-normalization = "0.1"
 url = "2.5"
+cap-std = "=4.0.3"
+cap-fs-ext = "=4.0.3"
 
 [dev-dependencies]
 tempfile = "3"

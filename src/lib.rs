@@ -1,7 +1,8 @@
-//! Offline, bounded input validation. No network or filesystem side effects.
+//! Bounded input validation and capability-scoped filesystem building blocks.
 
 pub mod magnet;
 pub mod path_policy;
+pub mod safe_storage;
 pub mod torrent_file;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
