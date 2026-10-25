@@ -56,7 +56,7 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
             let (mut socket, _) = tracker.accept().await.unwrap();
             let mut request = [0_u8; 8192];
             let _ = socket.read(&mut request).await.unwrap();
-            let mut body = b"d8:intervali30e5:peers6:".to_vec();
+            let mut body = b"d8:intervali1e5:peers6:".to_vec();
             body.extend(Ipv4Addr::LOCALHOST.octets());
             body.extend(peer.port().to_be_bytes());
             body.push(b'e');
@@ -121,10 +121,15 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     assert!(checked < total);
     assert!(!finished);
     service.resume(&item.id).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(25), service.wait_completed(&item.id))
-        .await
-        .unwrap()
-        .unwrap();
+    let repaired =
+        tokio::time::timeout(Duration::from_secs(20), service.wait_completed(&item.id)).await;
+    assert!(
+        repaired.is_ok(),
+        "verification repair stalled: {:?}, proxy connections: {}",
+        service.metrics(&item.id).await,
+        service.proxy_connections()
+    );
+    repaired.unwrap().unwrap();
     assert_eq!(std::fs::read(&downloaded).unwrap(), content);
     service.remove(&item.id).await.unwrap();
     assert!(service.list().unwrap().is_empty());

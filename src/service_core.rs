@@ -32,6 +32,7 @@ pub struct ServiceCore {
     mutation: AsyncMutex<()>,
 }
 
+#[derive(Debug)]
 pub struct TorrentMetrics {
     pub observed_state: String,
     pub progress_bytes: u64,
