@@ -6,6 +6,33 @@ fn magnet(n: u64) -> String {
 }
 
 #[test]
+fn recovery_keeps_registration_order_for_the_download_queue() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().join("downloads");
+    std::fs::create_dir(&root).unwrap();
+    let database = workspace.path().join("state.db");
+    let ids = {
+        let mut store = StateStore::open(&database).unwrap();
+        (1..=5)
+            .map(|number| {
+                store
+                    .register(AddInput::Magnet(&magnet(number)), &root, true)
+                    .unwrap()
+                    .id
+            })
+            .collect::<Vec<_>>()
+    };
+    let recovered = StateStore::open(&database)
+        .unwrap()
+        .recover()
+        .unwrap()
+        .into_iter()
+        .map(|record| record.id)
+        .collect::<Vec<_>>();
+    assert_eq!(recovered, ids);
+}
+
+#[test]
 fn registration_is_idempotent_and_conflicts_on_a_different_destination() {
     let workspace = tempfile::tempdir().unwrap();
     let root_a = workspace.path().join("a");

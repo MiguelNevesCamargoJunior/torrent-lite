@@ -180,7 +180,10 @@ async fn list(
             progress_bytes: metrics.as_ref().map(|value| value.progress_bytes),
             total_bytes: metrics.as_ref().map(|value| value.total_bytes),
             finished: metrics.as_ref().map(|value| value.finished),
-            observed_state: metrics.as_ref().map(|value| value.observed_state.clone()),
+            observed_state: metrics
+                .as_ref()
+                .map(|value| value.observed_state.clone())
+                .or_else(|| (item.desired == DesiredState::Running).then(|| "queued".to_owned())),
             uploaded_bytes: metrics.as_ref().map(|value| value.uploaded_bytes),
             download_bytes_per_sec: metrics
                 .as_ref()

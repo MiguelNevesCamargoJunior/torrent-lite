@@ -30,7 +30,10 @@ pub struct ServiceCore {
     policy: DestinationPolicy,
     handles: AsyncMutex<HashMap<String, Arc<ManagedTorrent>>>,
     mutation: AsyncMutex<()>,
+    max_active_downloads: usize,
 }
+
+pub const DEFAULT_MAX_ACTIVE_DOWNLOADS: usize = 3;
 
 #[derive(Debug)]
 pub struct TorrentMetrics {
@@ -52,6 +55,25 @@ impl ServiceCore {
         download_root: &Path,
         policy: DestinationPolicy,
     ) -> anyhow::Result<Self> {
+        Self::open_with_limit(
+            database,
+            download_root,
+            policy,
+            DEFAULT_MAX_ACTIVE_DOWNLOADS,
+        )
+        .await
+    }
+
+    pub async fn open_with_limit(
+        database: &Path,
+        download_root: &Path,
+        policy: DestinationPolicy,
+        max_active_downloads: usize,
+    ) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            (1..=100).contains(&max_active_downloads),
+            "max active downloads must be between 1 and 100"
+        );
         let root = SafeRoot::open(download_root)?;
         let root_path = download_root.canonicalize()?;
         let state = Arc::new(Mutex::new(StateStore::open(database)?));
@@ -88,19 +110,15 @@ impl ServiceCore {
             policy,
             handles: AsyncMutex::new(HashMap::new()),
             mutation: AsyncMutex::new(()),
+            max_active_downloads,
         };
         for item in service.list()? {
             anyhow::ensure!(
                 item.destination_root == service.root_path.to_string_lossy(),
                 "stored destination differs from configured root"
             );
-            if item.desired == DesiredState::Running {
-                match item.source_kind {
-                    SourceKind::Torrent => service.activate_torrent(&item).await?,
-                    SourceKind::Magnet => service.activate_magnet(&item).await?,
-                }
-            }
         }
+        service.reconcile_locked().await?;
         Ok(service)
     }
 
@@ -158,14 +176,14 @@ impl ServiceCore {
 
     pub async fn add_torrent(&self, bytes: &[u8], paused: bool) -> anyhow::Result<StoredTorrent> {
         let _guard = self.mutation.lock().await;
-        let sanitized = sanitize_torrent_with_policy(bytes, self.policy)?;
+        sanitize_torrent_with_policy(bytes, self.policy)?;
         let item = self
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .register(AddInput::Torrent(bytes), &self.root_path, paused)?;
         if item.desired == DesiredState::Running {
-            self.activate_bytes(&item, sanitized.bytes).await?;
+            self.reconcile_locked().await?;
         }
         Ok(item)
     }
@@ -193,38 +211,18 @@ impl ServiceCore {
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .register(AddInput::Magnet(magnet), &self.root_path, paused)?;
         if item.desired == DesiredState::Running {
-            self.activate_source(
-                &item,
-                AddTorrent::from_url(sanitized.uri),
-                Some(Duration::from_secs(30)),
-                false,
-            )
-            .await?;
+            self.reconcile_locked().await?;
         }
         Ok(item)
     }
 
     pub async fn resume(&self, id: &str) -> anyhow::Result<()> {
         let _guard = self.mutation.lock().await;
-        let item = self
-            .list()?
-            .into_iter()
-            .find(|item| item.id == id)
-            .ok_or_else(|| anyhow::anyhow!("torrent not found"))?;
         self.state
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .set_intent(id, DesiredState::Running)?;
-        let current_handle = { self.handles.lock().await.get(id).cloned() };
-        if let Some(handle) = current_handle {
-            self.session.unpause(&handle).await?;
-        } else {
-            match item.source_kind {
-                SourceKind::Torrent => self.activate_torrent(&item).await?,
-                SourceKind::Magnet => self.activate_magnet(&item).await?,
-            }
-        }
-        Ok(())
+        self.reconcile_locked().await
     }
 
     pub async fn pause(&self, id: &str) -> anyhow::Result<()> {
@@ -236,7 +234,7 @@ impl ServiceCore {
         if let Some(handle) = self.handles.lock().await.get(id).cloned() {
             self.session.pause(&handle).await?;
         }
-        Ok(())
+        self.reconcile_locked().await
     }
 
     /// Recheck every piece without network traffic, then restore the stored intent.
@@ -272,10 +270,7 @@ impl ServiceCore {
         let checked_handle = { self.handles.lock().await.get(id).cloned() }
             .ok_or_else(|| anyhow::anyhow!("verification handle unavailable"))?;
         checked_handle.wait_until_initialized().await?;
-        if item.desired == DesiredState::Running {
-            self.session.unpause(&checked_handle).await?;
-        }
-        Ok(())
+        self.reconcile_locked().await
     }
 
     pub async fn remove(&self, id: &str) -> anyhow::Result<()> {
@@ -291,7 +286,7 @@ impl ServiceCore {
                 .delete(TorrentIdOrHash::Id(handle.id()), false)
                 .await?;
         }
-        Ok(())
+        self.reconcile_locked().await
     }
 
     pub async fn wait_completed(&self, id: &str) -> anyhow::Result<()> {
@@ -308,6 +303,47 @@ impl ServiceCore {
 
     pub async fn stop(&self) {
         self.session.stop().await;
+    }
+
+    /// Reconcile stored intent with the bounded active set. Call periodically to
+    /// release slots after downloads finish without requiring a client request.
+    pub async fn tick_queue(&self) -> anyhow::Result<()> {
+        let _guard = self.mutation.lock().await;
+        self.reconcile_locked().await
+    }
+
+    async fn reconcile_locked(&self) -> anyhow::Result<()> {
+        let mut active = 0;
+        for item in self.list()? {
+            if item.desired != DesiredState::Running {
+                continue;
+            }
+            let existing = { self.handles.lock().await.get(&item.id).cloned() };
+            if let Some(handle) = existing {
+                let stats = handle.stats();
+                if stats.finished {
+                    if stats.state.to_string() != "paused" {
+                        self.session.pause(&handle).await?;
+                    }
+                    continue;
+                }
+                if active < self.max_active_downloads {
+                    if stats.state.to_string() == "paused" {
+                        self.session.unpause(&handle).await?;
+                    }
+                    active += 1;
+                } else if stats.state.to_string() != "paused" {
+                    self.session.pause(&handle).await?;
+                }
+            } else if active < self.max_active_downloads {
+                match item.source_kind {
+                    SourceKind::Torrent => self.activate_torrent(&item).await?,
+                    SourceKind::Magnet => self.activate_magnet(&item).await?,
+                }
+                active += 1;
+            }
+        }
+        Ok(())
     }
 
     async fn activate_torrent(&self, item: &StoredTorrent) -> anyhow::Result<()> {

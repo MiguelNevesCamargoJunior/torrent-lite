@@ -36,7 +36,7 @@ Inspect a local v1 metainfo file without starting a download:
 cargo run --locked -- inspect-torrent path/to/file.torrent --json
 ```
 
-The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The feature-gated service passed a synthetic pause, restart and tracker download test on Windows, Linux and macOS. Forced-process crash testing, queue limits and public swarm performance qualification are pending.
+The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The feature-gated service passed a synthetic pause, restart and tracker download test on Windows, Linux and macOS. Forced-process crash testing, bandwidth limits and public swarm performance qualification are pending.
 
 ## Experimental foreground download
 
@@ -57,7 +57,7 @@ Files for each torrent are placed under a directory named by the service ID insi
 The experimental foreground service can also be started separately with:
 
 ```sh
-cargo run --locked --features local-api -- serve --output path/to/downloads --state path/to/state.db
+cargo run --locked --features local-api -- serve --output path/to/downloads --state path/to/state.db --max-active 3
 ```
 
 It listens only on `127.0.0.1`, publishes a protected endpoint record beside the state database, and stops on Ctrl+C. In another terminal, use the same state database path:
@@ -73,6 +73,8 @@ cargo run --locked --features api-client -- remove TORRENT_ID --state path/to/st
 ```
 
 `add` accepts `--paused`. `verify` fully rechecks registered `.torrent` data and magnets whose metainfo has resolved, then restores the prior pause/running intent. Resolved magnet metainfo is cached in the state database so a restarted service can recheck without recontacting a tracker. Removing a record preserves downloaded files. For a local dashboard, leave the service running and start:
+
+The service queues downloads beyond `--max-active` in registration order. Completed downloads release a slot and are paused; the default limit is 3. See [queue behavior](docs/queue-spec.md) for current guarantees and remaining tests.
 
 ```sh
 cargo run --locked --features browser-ui -- ui --state path/to/state.db

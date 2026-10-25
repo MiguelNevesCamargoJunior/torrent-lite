@@ -80,6 +80,9 @@ enum Commands {
         output: std::path::PathBuf,
         #[arg(long)]
         state: std::path::PathBuf,
+        /// Maximum number of incomplete torrents downloading at once.
+        #[arg(long, default_value_t = 3)]
+        max_active: usize,
     },
     /// Inspect a v1 magnet locally. Does not connect to peers or download data.
     InspectMagnet {
@@ -152,7 +155,11 @@ fn main() -> ExitCode {
         #[cfg(feature = "api-client")]
         Commands::Verify { id, state } => return run_client(ClientAction::Verify(id), state),
         #[cfg(feature = "local-api")]
-        Commands::Serve { output, state } => return run_serve(output, state),
+        Commands::Serve {
+            output,
+            state,
+            max_active,
+        } => return run_serve(output, state, max_active),
         #[cfg(feature = "service-core")]
         Commands::DownloadTorrent {
             path,
@@ -363,7 +370,7 @@ fn run_client(action: ClientAction, state: std::path::PathBuf) -> ExitCode {
 }
 
 #[cfg(feature = "local-api")]
-fn run_serve(output: std::path::PathBuf, state: std::path::PathBuf) -> ExitCode {
+fn run_serve(output: std::path::PathBuf, state: std::path::PathBuf, max_active: usize) -> ExitCode {
     use std::sync::Arc;
     use torrent_lite::{
         local_api::LocalApi, network_policy::DestinationPolicy, service_core::ServiceCore,
@@ -380,8 +387,15 @@ fn run_serve(output: std::path::PathBuf, state: std::path::PathBuf) -> ExitCode 
         }
     };
     let result = runtime.block_on(async {
-        let service =
-            Arc::new(ServiceCore::open(&state, &output, DestinationPolicy::PublicOnly).await?);
+        let service = Arc::new(
+            ServiceCore::open_with_limit(
+                &state,
+                &output,
+                DestinationPolicy::PublicOnly,
+                max_active,
+            )
+            .await?,
+        );
         let api = LocalApi::bind(service.clone()).await?;
         let lease = match EndpointLease::publish(&state, &api) {
             Ok(lease) => lease,
@@ -391,7 +405,24 @@ fn run_serve(output: std::path::PathBuf, state: std::path::PathBuf) -> ExitCode 
             }
         };
         println!("Service listening on http://{}", api.local_addr());
-        let signal = tokio::signal::ctrl_c().await;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        interval.tick().await;
+        let mut queue_error_reported = false;
+        let signal = loop {
+            tokio::select! {
+                signal = tokio::signal::ctrl_c() => break signal,
+                _ = interval.tick() => {
+                    if service.tick_queue().await.is_err() {
+                        if !queue_error_reported {
+                            eprintln!("error: unable to activate a queued torrent; retrying");
+                            queue_error_reported = true;
+                        }
+                    } else {
+                        queue_error_reported = false;
+                    }
+                }
+            }
+        };
         drop(lease);
         drop(api);
         service.stop().await;

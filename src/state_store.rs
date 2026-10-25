@@ -366,7 +366,7 @@ impl StateStore {
 
     pub fn recover(&self) -> Result<Vec<StoredTorrent>, StoreError> {
         let mut statement = self.connection.prepare(
-            "SELECT id,info_hash,source_kind,destination_root,desired FROM torrents WHERE tombstone=0 ORDER BY id",
+            "SELECT id,info_hash,source_kind,destination_root,desired FROM torrents WHERE tombstone=0 ORDER BY rowid",
         )?;
         let records = statement.query_map([], |row| {
             Ok((

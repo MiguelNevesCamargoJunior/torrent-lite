@@ -12,6 +12,83 @@ use torrent_lite::{
 };
 
 #[tokio::test]
+async fn queue_limits_active_downloads_and_survives_restart() {
+    let workspace = tempfile::tempdir().unwrap();
+    let source = workspace.path().join("source");
+    let download = workspace.path().join("download");
+    std::fs::create_dir(&source).unwrap();
+    std::fs::create_dir(&download).unwrap();
+    let seeder = Session::new_with_opts(
+        source.clone(),
+        SessionOptions {
+            dht: None,
+            disable_trackers: true,
+            disable_local_service_discovery: true,
+            persistence: None,
+            listen: Some(ListenerOptions {
+                listen_addr: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+                ipv4_only: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let mut sources = Vec::new();
+    for index in 0..3 {
+        let path = source.join(format!("sample-{index}.bin"));
+        std::fs::write(&path, vec![index as u8 + 1; 32 * 1024]).unwrap();
+        let (torrent, _) = seeder
+            .create_and_serve_torrent(
+                &path,
+                CreateTorrentOptions {
+                    piece_length: Some(16 * 1024),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        sources.push(torrent.as_bytes().unwrap());
+    }
+    let database = workspace.path().join("state.db");
+    let service =
+        ServiceCore::open_with_limit(&database, &download, DestinationPolicy::AllowLan, 1)
+            .await
+            .unwrap();
+    let first = service.add_torrent(&sources[0], false).await.unwrap();
+    let second = service.add_torrent(&sources[1], false).await.unwrap();
+    let third = service.add_torrent(&sources[2], false).await.unwrap();
+    assert!(service.metrics(&first.id).await.is_some());
+    assert!(service.metrics(&second.id).await.is_none());
+    assert!(service.metrics(&third.id).await.is_none());
+    service.pause(&first.id).await.unwrap();
+    assert!(service.metrics(&second.id).await.is_some());
+    assert!(service.metrics(&third.id).await.is_none());
+    service.stop().await;
+    drop(service);
+
+    let reopened =
+        ServiceCore::open_with_limit(&database, &download, DestinationPolicy::AllowLan, 1)
+            .await
+            .unwrap();
+    assert_eq!(
+        reopened
+            .list()
+            .unwrap()
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![first.id.as_str(), second.id.as_str(), third.id.as_str()]
+    );
+    assert!(reopened.metrics(&first.id).await.is_none());
+    assert!(reopened.metrics(&second.id).await.is_some());
+    assert!(reopened.metrics(&third.id).await.is_none());
+    reopened.stop().await;
+    seeder.stop().await;
+}
+
+#[tokio::test]
 async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     let workspace = tempfile::tempdir().unwrap();
     let source = workspace.path().join("source");
