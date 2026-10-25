@@ -74,5 +74,33 @@ async fn transfers_a_synthetic_file_between_local_sessions() {
         content
     );
     leecher.stop().await;
+    let downloaded = destination.join("synthetic.bin");
+    let mut damaged = std::fs::read(&downloaded).unwrap();
+    damaged[17_000] ^= 0xff;
+    std::fs::write(&downloaded, damaged).unwrap();
+
+    let restarted = Session::new_with_opts(destination.clone(), isolated_options())
+        .await
+        .unwrap();
+    let handle = restarted
+        .add_torrent(
+            AddTorrent::from_bytes(torrent.as_bytes().unwrap()),
+            Some(AddTorrentOptions {
+                initial_peers: Some(vec![peer]),
+                peer_limit: Some(2),
+                overwrite: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .into_handle()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(20), handle.wait_until_completed())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(std::fs::read(&downloaded).unwrap(), content);
+    restarted.stop().await;
     seeder.stop().await;
 }
