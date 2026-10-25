@@ -542,6 +542,30 @@ async fn completed_download_releases_queue_slot_and_seeding_is_bounded() {
         "paused"
     );
     service.stop().await;
+    drop(service);
+    let reopened = ServiceCore::open_with_settings(
+        &database,
+        &download,
+        DestinationPolicy::AllowLan,
+        ServiceSettings::new(1, Some(64), None)
+            .unwrap()
+            .with_max_seeding(1)
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    reopened.tick_queue().await.unwrap();
+    assert!(reopened.metrics(&first.id).await.unwrap().finished);
+    assert!(reopened.metrics(&second.id).await.unwrap().finished);
+    assert_eq!(
+        reopened.metrics(&first.id).await.unwrap().observed_state,
+        "live"
+    );
+    assert_eq!(
+        reopened.metrics(&second.id).await.unwrap().observed_state,
+        "paused"
+    );
+    reopened.stop().await;
     tracker_task.abort();
     seeder.stop().await;
 }
