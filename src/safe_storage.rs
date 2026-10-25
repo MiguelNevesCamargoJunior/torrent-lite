@@ -17,7 +17,7 @@ use std::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FileIdentity {
     device: u64,
-    inode: u64,
+    file_id: [u8; 16],
 }
 
 impl FileIdentity {
@@ -31,25 +31,45 @@ impl FileIdentity {
                     "unsupported file identity",
                 ));
             }
+            let mut file_id = [0_u8; 16];
+            file_id[..8].copy_from_slice(&metadata.ino().to_le_bytes());
             Ok(Self {
                 device: metadata.dev(),
-                inode: metadata.ino(),
+                file_id,
             })
         }
         #[cfg(windows)]
         {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Storage::FileSystem::{
+                FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
+            };
             let metadata = file.metadata()?;
             let information = winx::winapi_util::file::information(file.try_clone()?.into_std())?;
-            let device = information.volume_serial_number();
-            let inode = information.file_index();
-            let links = information.number_of_links();
-            if !metadata.is_file() || links != 1 || inode == 0 {
+            let mut id_info = FILE_ID_INFO::default();
+            // The file handle stays open, and the mutable buffer has the exact Win32 size.
+            let success = unsafe {
+                GetFileInformationByHandleEx(
+                    file.as_raw_handle(),
+                    FileIdInfo,
+                    (&raw mut id_info).cast(),
+                    std::mem::size_of::<FILE_ID_INFO>() as u32,
+                )
+            };
+            if success == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let file_id = id_info.FileId.Identifier;
+            if !metadata.is_file() || information.number_of_links() != 1 || file_id == [0; 16] {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     "unsupported file identity",
                 ));
             }
-            Ok(Self { device, inode })
+            Ok(Self {
+                device: id_info.VolumeSerialNumber,
+                file_id,
+            })
         }
         #[cfg(not(any(unix, windows)))]
         {

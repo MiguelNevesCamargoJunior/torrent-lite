@@ -23,7 +23,7 @@ The first transfer experiment lives in `tests/engine_local.rs`, gated by `engine
 
 1. Create a test-only adapter with discovery disabled and explicit loopback peers. Transfer a synthetic payload and assert bytes and piece hashes.
 2. Stop/restart with existing data; corrupt a cross-file piece, verify and assert only invalid data is fetched again.
-3. Persist identities in an application database, then qualify the custom StorageFactory with Windows junction replacement and POSIX symlink races before allowing engine writes to untrusted paths. ReFS uses 128-bit file IDs; the current 64-bit `cap-fs-ext` identity is insufficient there and must fail closed or be replaced.
+3. Persist identities in an application database, then qualify the custom StorageFactory with Windows junction replacement and POSIX symlink races before allowing engine writes to untrusted paths. Windows now requests a 128-bit `FILE_ID_INFO` and fails if unavailable; real ReFS behavior still needs testing.
 4. Prove all tracker/peer connection routes apply the destination policy after DNS and each redirect. A peer blocklist alone is insufficient.
 5. Bound metadata parsing, buffers, init concurrency and aggregate peers; verify settings under load.
 6. Review the selected dependency graph and licenses; build with fixed features; then measure actual resource usage.
