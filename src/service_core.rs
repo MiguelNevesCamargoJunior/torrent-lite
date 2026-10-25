@@ -377,7 +377,9 @@ impl ServiceCore {
         self.failures.lock().await.remove(id);
         self.cancel_pending_magnet(id).await;
         if let Some(handle) = self.handles.lock().await.get(id).cloned() {
-            self.session.pause(&handle).await?;
+            if handle.stats().state.to_string() != "paused" {
+                self.session.pause(&handle).await?;
+            }
         }
         self.reconcile_locked(false).await
     }
