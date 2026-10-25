@@ -60,6 +60,8 @@ The experimental foreground service can also be started separately with:
 cargo run --locked --features local-api -- serve --output path/to/downloads --state path/to/state.db --max-active 3
 ```
 
+Add `--download-limit-kib 512` or `--upload-limit-kib 128` to cap global throughput. Omit either flag for unlimited speed in that direction. Values must be at least 16 KiB/s; see [bandwidth behavior](docs/bandwidth-spec.md). The service queues downloads beyond `--max-active` in registration order. Completed downloads release a slot and are paused; see [queue behavior](docs/queue-spec.md).
+
 It listens only on `127.0.0.1`, publishes a protected endpoint record beside the state database, and stops on Ctrl+C. In another terminal, use the same state database path:
 
 ```sh
@@ -73,8 +75,6 @@ cargo run --locked --features api-client -- remove TORRENT_ID --state path/to/st
 ```
 
 `add` accepts `--paused`. `verify` fully rechecks registered `.torrent` data and magnets whose metainfo has resolved, then restores the prior pause/running intent. Resolved magnet metainfo is cached in the state database so a restarted service can recheck without recontacting a tracker. Removing a record preserves downloaded files. For a local dashboard, leave the service running and start:
-
-The service queues downloads beyond `--max-active` in registration order. Completed downloads release a slot and are paused; the default limit is 3. See [queue behavior](docs/queue-spec.md) for current guarantees and remaining tests.
 
 ```sh
 cargo run --locked --features browser-ui -- ui --state path/to/state.db

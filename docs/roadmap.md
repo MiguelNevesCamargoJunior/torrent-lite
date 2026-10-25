@@ -10,6 +10,7 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 - [x] Authenticated loopback API and protected service discovery; CLI add/list/pause/resume/remove.
 - [x] MCP stdio adapter and ephemeral read-only browser dashboard, subject to CI qualification.
 - [x] Explicit piece recheck for `.torrent` records, subject to CI qualification.
+- [x] Bounded persistent download queue and optional global bandwidth caps at service startup, subject to CI qualification.
 
 ## Required before a stable release
 

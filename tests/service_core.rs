@@ -1,15 +1,56 @@
 use librqbit::{CreateTorrentOptions, ListenerOptions, Session, SessionOptions};
 use std::{
     net::{Ipv4Addr, SocketAddr},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
 };
 use torrent_lite::{
-    network_policy::DestinationPolicy, service_core::ServiceCore, state_store::DesiredState,
+    network_policy::DestinationPolicy,
+    service_core::{ServiceCore, ServiceSettings},
+    state_store::DesiredState,
 };
+
+#[test]
+fn bandwidth_settings_reject_values_that_the_engine_cannot_apply() {
+    assert!(ServiceSettings::new(0, None, None).is_err());
+    assert!(ServiceSettings::new(1, Some(0), None).is_err());
+    assert!(ServiceSettings::new(1, Some(15), None).is_err());
+    assert!(ServiceSettings::new(1, None, Some(15)).is_err());
+    assert!(ServiceSettings::new(1, Some(4_194_304), None).is_err());
+    assert_eq!(
+        ServiceSettings::new(1, Some(4_194_303), None)
+            .unwrap()
+            .download_limit_bps(),
+        Some(4_294_966_272)
+    );
+    let limits = ServiceSettings::new(2, Some(64), Some(128)).unwrap();
+    assert_eq!(limits.download_limit_bps(), Some(65_536));
+    assert_eq!(limits.upload_limit_bps(), Some(131_072));
+}
+
+#[tokio::test]
+async fn service_applies_global_bandwidth_limits_to_the_engine() {
+    let workspace = tempfile::tempdir().unwrap();
+    let download = workspace.path().join("download");
+    std::fs::create_dir(&download).unwrap();
+    let settings = ServiceSettings::new(1, Some(64), Some(128)).unwrap();
+    let service = ServiceCore::open_with_settings(
+        &workspace.path().join("state.db"),
+        &download,
+        DestinationPolicy::AllowLan,
+        settings,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        service.bandwidth_limits_bps(),
+        (Some(65_536), Some(131_072))
+    );
+    service.stop().await;
+}
 
 #[tokio::test]
 async fn queue_limits_active_downloads_and_survives_restart() {
@@ -142,7 +183,8 @@ async fn completed_download_releases_queue_slot_without_client_mutation() {
     let mut sources = Vec::new();
     for index in 0..2 {
         let path = source.join(format!("queued-{index}.bin"));
-        std::fs::write(&path, vec![index as u8 + 1; 32 * 1024]).unwrap();
+        let size = if index == 0 { 128 * 1024 } else { 32 * 1024 };
+        std::fs::write(&path, vec![index as u8 + 1; size]).unwrap();
         let (torrent, _) = seeder
             .create_and_serve_torrent(
                 &path,
@@ -163,19 +205,25 @@ async fn completed_download_releases_queue_slot_without_client_mutation() {
         sources.push(bytes);
     }
     let database = workspace.path().join("state.db");
-    let service =
-        ServiceCore::open_with_limit(&database, &download, DestinationPolicy::AllowLan, 1)
-            .await
-            .unwrap();
+    let service = ServiceCore::open_with_settings(
+        &database,
+        &download,
+        DestinationPolicy::AllowLan,
+        ServiceSettings::new(1, Some(64), None).unwrap(),
+    )
+    .await
+    .unwrap();
     let first = service.add_torrent(&sources[0], false).await.unwrap();
     let second = service.add_torrent(&sources[1], false).await.unwrap();
     assert!(service.metrics(&first.id).await.is_some());
     assert!(service.metrics(&second.id).await.is_none());
+    let started = Instant::now();
     release_tracker.send(true).unwrap();
     tokio::time::timeout(Duration::from_secs(25), service.wait_completed(&first.id))
         .await
         .unwrap()
         .unwrap();
+    assert!(started.elapsed() >= Duration::from_millis(500));
     service.tick_queue().await.unwrap();
     assert!(service.metrics(&second.id).await.is_some());
     tokio::time::timeout(Duration::from_secs(25), service.wait_completed(&second.id))

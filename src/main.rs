@@ -83,6 +83,12 @@ enum Commands {
         /// Maximum number of incomplete torrents downloading at once.
         #[arg(long, default_value_t = 3)]
         max_active: usize,
+        /// Global download limit in KiB/s (omitted means unlimited).
+        #[arg(long)]
+        download_limit_kib: Option<u32>,
+        /// Global upload limit in KiB/s (omitted means unlimited).
+        #[arg(long)]
+        upload_limit_kib: Option<u32>,
     },
     /// Inspect a v1 magnet locally. Does not connect to peers or download data.
     InspectMagnet {
@@ -159,7 +165,17 @@ fn main() -> ExitCode {
             output,
             state,
             max_active,
-        } => return run_serve(output, state, max_active),
+            download_limit_kib,
+            upload_limit_kib,
+        } => {
+            return run_serve(
+                output,
+                state,
+                max_active,
+                download_limit_kib,
+                upload_limit_kib,
+            );
+        }
         #[cfg(feature = "service-core")]
         Commands::DownloadTorrent {
             path,
@@ -370,11 +386,26 @@ fn run_client(action: ClientAction, state: std::path::PathBuf) -> ExitCode {
 }
 
 #[cfg(feature = "local-api")]
-fn run_serve(output: std::path::PathBuf, state: std::path::PathBuf, max_active: usize) -> ExitCode {
+fn run_serve(
+    output: std::path::PathBuf,
+    state: std::path::PathBuf,
+    max_active: usize,
+    download_limit_kib: Option<u32>,
+    upload_limit_kib: Option<u32>,
+) -> ExitCode {
     use std::sync::Arc;
     use torrent_lite::{
-        local_api::LocalApi, network_policy::DestinationPolicy, service_core::ServiceCore,
+        local_api::LocalApi,
+        network_policy::DestinationPolicy,
+        service_core::{ServiceCore, ServiceSettings},
         service_discovery::EndpointLease,
+    };
+    let settings = match ServiceSettings::new(max_active, download_limit_kib, upload_limit_kib) {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -388,11 +419,11 @@ fn run_serve(output: std::path::PathBuf, state: std::path::PathBuf, max_active: 
     };
     let result = runtime.block_on(async {
         let service = Arc::new(
-            ServiceCore::open_with_limit(
+            ServiceCore::open_with_settings(
                 &state,
                 &output,
                 DestinationPolicy::PublicOnly,
-                max_active,
+                settings,
             )
             .await?,
         );

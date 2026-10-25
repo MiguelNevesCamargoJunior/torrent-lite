@@ -10,11 +10,12 @@ use crate::{
 };
 use librqbit::{
     AddTorrent, AddTorrentOptions, ConnectionOptions, ListenerOptions, ManagedTorrent, Session,
-    SessionOptions, api::TorrentIdOrHash, storage::StorageFactoryExt,
+    SessionOptions, api::TorrentIdOrHash, limits::LimitsConfig, storage::StorageFactoryExt,
 };
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, SocketAddr},
+    num::NonZeroU32,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -34,6 +35,60 @@ pub struct ServiceCore {
 }
 
 pub const DEFAULT_MAX_ACTIVE_DOWNLOADS: usize = 3;
+
+#[derive(Debug, Clone, Copy)]
+pub struct ServiceSettings {
+    max_active_downloads: usize,
+    download_limit_bps: Option<NonZeroU32>,
+    upload_limit_bps: Option<NonZeroU32>,
+}
+
+impl Default for ServiceSettings {
+    fn default() -> Self {
+        Self {
+            max_active_downloads: DEFAULT_MAX_ACTIVE_DOWNLOADS,
+            download_limit_bps: None,
+            upload_limit_bps: None,
+        }
+    }
+}
+
+impl ServiceSettings {
+    pub fn new(
+        max_active_downloads: usize,
+        download_limit_kib: Option<u32>,
+        upload_limit_kib: Option<u32>,
+    ) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            (1..=100).contains(&max_active_downloads),
+            "max active downloads must be between 1 and 100"
+        );
+        fn limit(value: Option<u32>) -> anyhow::Result<Option<NonZeroU32>> {
+            value
+                .map(|kib| {
+                    anyhow::ensure!(kib >= 16, "bandwidth limit must be at least 16 KiB/s");
+                    let bps = kib
+                        .checked_mul(1024)
+                        .ok_or_else(|| anyhow::anyhow!("bandwidth limit exceeds u32 range"))?;
+                    Ok(NonZeroU32::new(bps).expect("validated positive bandwidth"))
+                })
+                .transpose()
+        }
+        Ok(Self {
+            max_active_downloads,
+            download_limit_bps: limit(download_limit_kib)?,
+            upload_limit_bps: limit(upload_limit_kib)?,
+        })
+    }
+
+    pub fn download_limit_bps(&self) -> Option<u32> {
+        self.download_limit_bps.map(NonZeroU32::get)
+    }
+
+    pub fn upload_limit_bps(&self) -> Option<u32> {
+        self.upload_limit_bps.map(NonZeroU32::get)
+    }
+}
 
 #[derive(Debug)]
 pub struct TorrentMetrics {
@@ -55,13 +110,7 @@ impl ServiceCore {
         download_root: &Path,
         policy: DestinationPolicy,
     ) -> anyhow::Result<Self> {
-        Self::open_with_limit(
-            database,
-            download_root,
-            policy,
-            DEFAULT_MAX_ACTIVE_DOWNLOADS,
-        )
-        .await
+        Self::open_with_settings(database, download_root, policy, ServiceSettings::default()).await
     }
 
     pub async fn open_with_limit(
@@ -70,10 +119,16 @@ impl ServiceCore {
         policy: DestinationPolicy,
         max_active_downloads: usize,
     ) -> anyhow::Result<Self> {
-        anyhow::ensure!(
-            (1..=100).contains(&max_active_downloads),
-            "max active downloads must be between 1 and 100"
-        );
+        let settings = ServiceSettings::new(max_active_downloads, None, None)?;
+        Self::open_with_settings(database, download_root, policy, settings).await
+    }
+
+    pub async fn open_with_settings(
+        database: &Path,
+        download_root: &Path,
+        policy: DestinationPolicy,
+        settings: ServiceSettings,
+    ) -> anyhow::Result<Self> {
         let root = SafeRoot::open(download_root)?;
         let root_path = download_root.canonicalize()?;
         let state = Arc::new(Mutex::new(StateStore::open(database)?));
@@ -97,6 +152,10 @@ impl ServiceCore {
                 }),
                 peer_limit: Some(50),
                 concurrent_init_limit: Some(3),
+                ratelimits: LimitsConfig {
+                    download_bps: settings.download_limit_bps,
+                    upload_bps: settings.upload_limit_bps,
+                },
                 ..Default::default()
             },
         )
@@ -110,7 +169,7 @@ impl ServiceCore {
             policy,
             handles: AsyncMutex::new(HashMap::new()),
             mutation: AsyncMutex::new(()),
-            max_active_downloads,
+            max_active_downloads: settings.max_active_downloads,
         };
         for item in service.list()? {
             anyhow::ensure!(
@@ -132,6 +191,14 @@ impl ServiceCore {
 
     pub fn proxy_connections(&self) -> u64 {
         self.proxy.successful_connections()
+    }
+
+    pub fn bandwidth_limits_bps(&self) -> (Option<u32>, Option<u32>) {
+        let limits = self.session.ratelimits.get_config();
+        (
+            limits.download_bps.map(NonZeroU32::get),
+            limits.upload_bps.map(NonZeroU32::get),
+        )
     }
 
     pub async fn progress(&self, id: &str) -> Option<(u64, u64, bool)> {
