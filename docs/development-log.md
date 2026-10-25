@@ -42,3 +42,9 @@ Ruling: no production engine dependency yet. Source inspection found qualificati
 - Hosted CI run 40206759591 passed the custom storage test on all three OS targets. The adapter remains test-only.
 - `FileIdentity` records volume/device and file ID from a handle, and `SafeRoot::open_existing` compares after opening without following the final symlink. It rejects hard links and changed identity. Tests first failed on missing API, then passed on native Windows. Hosted CI run 40207177088 passed the engine restart through this adapter on Windows, Ubuntu and macOS.
 - On stable Rust 1.91, `std::os::windows::fs::MetadataExt` by-handle IDs are unstable. The first `cap-fs-ext` path could panic if a filesystem omitted identity fields. Windows now uses the fallible `winx` wrapper for link count and `GetFileInformationByHandleEx(FileIdInfo)` for the full 128-bit ID, returning an OS error if that query fails. Local tests pass; actual ReFS qualification remains outstanding. Source: https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_id_info.
+
+## Transactional state work
+
+- Plan: `docs/superpowers/plans/2026-10-25-state-store.md`. The first SQLite tests cover idempotent add, destination conflicts, the 100-record cap, durable pause/resume, tombstone recovery, future schema rejection and v1 `.torrent` source bytes.
+- The first local RED attempt cannot compile the bundled SQLite amalgamation: this machine's Visual Studio C toolchain lacks `stdarg.h`. The default Rust suite still runs; the feature-gated SQLite suite must be exercised by hosted CI until the local C headers are repaired.
+- The store is not wired to CLI or engine. It does not yet provide a process lock, migrations from older schemas, persistent file IDs or a validated state-directory ACL. The feature gate prevents presenting it as a functional downloader.

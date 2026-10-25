@@ -3,6 +3,8 @@
 pub mod magnet;
 pub mod path_policy;
 pub mod safe_storage;
+#[cfg(feature = "state-store")]
+pub mod state_store;
 pub mod torrent_file;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

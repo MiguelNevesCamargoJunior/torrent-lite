@@ -8,10 +8,11 @@ The approved design targets one download service with a CLI, a local browser UI 
 
 ## Development status
 
-The first milestone establishes input validation and an offline inspection CLI, plus an explicit compatibility/security gate for the proposed `librqbit` engine. A capability-scoped helper can create new files inside a chosen root, and a feature-gated local-peer test exercises the engine. Downloading through the CLI, persistence, MCP and the web UI are subsequent milestones.
+The first milestone establishes input validation and an offline inspection CLI, plus an explicit compatibility/security gate for the proposed `librqbit` engine. A capability-scoped helper opens files inside a chosen root, and a feature-gated local-peer test exercises the engine. A feature-gated SQLite intent store is under development. Downloading through the CLI, a running service, MCP and the web UI are subsequent milestones.
 
 - [Design](docs/superpowers/specs/2026-10-25-torrent-design.md) (Portuguese)
 - [Initial implementation plan](docs/superpowers/plans/2026-10-25-foundation.md)
+- [State store plan](docs/superpowers/plans/2026-10-25-state-store.md)
 - [Engine assessment](docs/engine-assessment.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
