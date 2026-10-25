@@ -95,6 +95,27 @@ async fn list_over_http(endpoint: &torrent_lite::service_discovery::EndpointInfo
     String::from_utf8(response).unwrap()
 }
 
+async fn post_over_http(
+    endpoint: &torrent_lite::service_discovery::EndpointInfo,
+    path: &str,
+    body: &str,
+) -> String {
+    let mut stream = TcpStream::connect(endpoint.addr).await.unwrap();
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        endpoint.addr,
+        endpoint.token,
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(3), stream.read_to_end(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    String::from_utf8(response).unwrap()
+}
+
 #[tokio::test]
 async fn forced_stop_then_restart_replaces_stale_endpoint() {
     let workspace = tempfile::tempdir().unwrap();
@@ -118,11 +139,43 @@ async fn forced_stop_then_restart_replaces_stale_endpoint() {
     let mut first = start();
     let before = await_new_endpoint(&database, None).await;
     assert!(list_over_http(&before).await.starts_with("HTTP/1.1 200"));
+    let add_one = post_over_http(
+        &before,
+        "/api/v1/torrents",
+        r#"{"magnet":"magnet:?xt=urn:btih:0000000000000000000000000000000000000001","paused":true}"#,
+    )
+    .await;
+    assert!(add_one.starts_with("HTTP/1.1 201"));
+    let first_id =
+        serde_json::from_str::<serde_json::Value>(add_one.split("\r\n\r\n").nth(1).unwrap())
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let add_two = post_over_http(
+        &before,
+        "/api/v1/torrents",
+        r#"{"magnet":"magnet:?xt=urn:btih:0000000000000000000000000000000000000002","paused":true}"#,
+    )
+    .await;
+    assert!(add_two.starts_with("HTTP/1.1 201"));
+    assert!(
+        post_over_http(&before, &format!("/api/v1/torrents/{first_id}/remove"), "")
+            .await
+            .starts_with("HTTP/1.1 204")
+    );
+    let before_crash = list_over_http(&before).await;
+    assert!(before_crash.contains("0000000000000000000000000000000000000002"));
+    assert!(!before_crash.contains("0000000000000000000000000000000000000001"));
     first.0.kill().unwrap();
     first.0.wait().unwrap();
     let second = start();
     let after = await_new_endpoint(&database, Some(&before.token)).await;
     assert_ne!(after.token, before.token);
-    assert!(list_over_http(&after).await.starts_with("HTTP/1.1 200"));
+    let recovered = list_over_http(&after).await;
+    assert!(recovered.starts_with("HTTP/1.1 200"));
+    assert!(recovered.contains("0000000000000000000000000000000000000002"));
+    assert!(recovered.contains("\"desired\":\"paused\""));
+    assert!(!recovered.contains("0000000000000000000000000000000000000001"));
     drop(second);
 }
