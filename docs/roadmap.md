@@ -16,6 +16,7 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 
 - [x] Store validated resolved metainfo for magnets so restart and explicit verification do not depend on a tracker being online, subject to CI qualification.
 - [ ] Complete lifecycle controls: start/stop/status, queueing, concurrency and bandwidth limits, selected files, seeding policy.
+- [ ] Resolve uncached magnet metadata without holding the service mutation lock during the network wait. Startup and direct controls skip that wait; the periodic queue tick can still occupy it for up to 30 seconds per attempt.
 - [ ] Finish browser UI qualification: automated keyboard/browser tests, usability review and CSRF regression coverage across supported browsers.
 - [ ] Show measured speed, peers, error states and ETA without inventing values; provide machine-readable API errors.
 - [ ] Qualify DHT, UDP trackers, private torrents and peer discovery under the outbound network policy, or document narrower compatibility.

@@ -10,7 +10,7 @@ use tokio::{
 use torrent_lite::{
     network_policy::DestinationPolicy,
     service_core::{ServiceCore, ServiceSettings},
-    state_store::DesiredState,
+    state_store::{AddInput, DesiredState, StateStore},
 };
 
 #[test]
@@ -49,6 +49,42 @@ async fn service_applies_global_bandwidth_limits_to_the_engine() {
         service.bandwidth_limits_bps(),
         (Some(65_536), Some(131_072))
     );
+    service.stop().await;
+}
+
+#[tokio::test]
+async fn unresolved_magnet_does_not_delay_startup_or_local_additions() {
+    let workspace = tempfile::tempdir().unwrap();
+    let download = workspace.path().join("download");
+    std::fs::create_dir(&download).unwrap();
+    let database = workspace.path().join("state.db");
+    let silent_tracker = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let tracker_url = format!("http://{}/announce", silent_tracker.local_addr().unwrap());
+    let magnet =
+        format!("magnet:?xt=urn:btih:0000000000000000000000000000000000000001&tr={tracker_url}");
+    StateStore::open(&database)
+        .unwrap()
+        .register(AddInput::Magnet(&magnet), &download, false)
+        .unwrap();
+
+    let service = tokio::time::timeout(
+        Duration::from_secs(2),
+        ServiceCore::open(&database, &download, DestinationPolicy::AllowLan),
+    )
+    .await
+    .expect("startup waited for unresolved magnet metadata")
+    .unwrap();
+    let mut metainfo = b"d4:infod6:lengthi4e4:name8:file.txt12:piece lengthi4e6:pieces20:".to_vec();
+    metainfo.extend([0_u8; 20]);
+    metainfo.extend(b"ee");
+    let local = tokio::time::timeout(
+        Duration::from_secs(2),
+        service.add_torrent(&metainfo, false),
+    )
+    .await
+    .expect("local torrent addition waited for unresolved magnet metadata")
+    .unwrap();
+    assert!(service.metrics(&local.id).await.is_some());
     service.stop().await;
 }
 
@@ -464,6 +500,7 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     .await
     .unwrap();
     let magnet_item = service.add_magnet(&magnet).await.unwrap();
+    service.tick_queue().await.unwrap();
     tokio::time::timeout(
         Duration::from_secs(25),
         service.wait_completed(&magnet_item.id),

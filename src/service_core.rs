@@ -201,7 +201,7 @@ impl ServiceCore {
                 "stored destination differs from configured root"
             );
         }
-        service.reconcile_locked().await?;
+        service.reconcile_locked(false).await?;
         Ok(service)
     }
 
@@ -282,7 +282,7 @@ impl ServiceCore {
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .register(AddInput::Torrent(bytes), &self.root_path, paused)?;
         if item.desired == DesiredState::Running {
-            self.reconcile_locked().await?;
+            self.reconcile_locked(false).await?;
         }
         Ok(item)
     }
@@ -310,7 +310,7 @@ impl ServiceCore {
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .register(AddInput::Magnet(magnet), &self.root_path, paused)?;
         if item.desired == DesiredState::Running {
-            self.reconcile_locked().await?;
+            self.reconcile_locked(false).await?;
         }
         Ok(item)
     }
@@ -322,7 +322,7 @@ impl ServiceCore {
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
             .set_intent(id, DesiredState::Running)?;
         self.failures.lock().await.remove(id);
-        self.reconcile_locked().await
+        self.reconcile_locked(false).await
     }
 
     pub async fn pause(&self, id: &str) -> anyhow::Result<()> {
@@ -335,7 +335,7 @@ impl ServiceCore {
         if let Some(handle) = self.handles.lock().await.get(id).cloned() {
             self.session.pause(&handle).await?;
         }
-        self.reconcile_locked().await
+        self.reconcile_locked(false).await
     }
 
     /// Recheck every piece without network traffic, then restore the stored intent.
@@ -372,7 +372,7 @@ impl ServiceCore {
             .ok_or_else(|| anyhow::anyhow!("verification handle unavailable"))?;
         checked_handle.wait_until_initialized().await?;
         self.failures.lock().await.remove(id);
-        self.reconcile_locked().await
+        self.reconcile_locked(false).await
     }
 
     pub async fn remove(&self, id: &str) -> anyhow::Result<()> {
@@ -389,7 +389,7 @@ impl ServiceCore {
                 .delete(TorrentIdOrHash::Id(handle.id()), false)
                 .await?;
         }
-        self.reconcile_locked().await
+        self.reconcile_locked(false).await
     }
 
     pub async fn wait_completed(&self, id: &str) -> anyhow::Result<()> {
@@ -412,10 +412,10 @@ impl ServiceCore {
     /// release slots after downloads finish without requiring a client request.
     pub async fn tick_queue(&self) -> anyhow::Result<()> {
         let _guard = self.mutation.lock().await;
-        self.reconcile_locked().await
+        self.reconcile_locked(true).await
     }
 
-    async fn reconcile_locked(&self) -> anyhow::Result<()> {
+    async fn reconcile_locked(&self, resolve_uncached_magnets: bool) -> anyhow::Result<()> {
         let mut active = 0;
         for item in self.list()? {
             if item.desired != DesiredState::Running {
@@ -440,6 +440,16 @@ impl ServiceCore {
                     self.session.pause(&handle).await?;
                 }
             } else if active < self.max_active_downloads {
+                if item.source_kind == SourceKind::Magnet && !resolve_uncached_magnets {
+                    let cached = self
+                        .state
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+                        .load_resolved_metainfo(&item.id)?;
+                    if cached.is_none() {
+                        continue;
+                    }
+                }
                 let previous = self.failures.lock().await.get(&item.id).copied();
                 if previous.is_some_and(|failure| failure.retry_after > Instant::now()) {
                     continue;
