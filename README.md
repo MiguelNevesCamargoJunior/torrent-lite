@@ -60,7 +60,7 @@ The experimental foreground service can also be started separately with:
 cargo run --locked --features local-api -- serve --output path/to/downloads --state path/to/state.db --max-active 3
 ```
 
-Add `--download-limit-kib 512` or `--upload-limit-kib 128` to cap global throughput. Omit either flag for unlimited speed in that direction. Values must be at least 16 KiB/s; see [bandwidth behavior](docs/bandwidth-spec.md). The service queues downloads beyond `--max-active` in registration order. Completed downloads release a slot and are paused; see [queue behavior](docs/queue-spec.md).
+Add `--download-limit-kib 512` or `--upload-limit-kib 128` to cap global throughput. Omit either flag for unlimited speed in that direction. Values must be at least 16 KiB/s; see [bandwidth behavior](docs/bandwidth-spec.md). The service queues downloads beyond `--max-active` in registration order. Completed downloads release a download slot and are paused by default. Use `--max-seeding 1` to keep one completed torrent sharing verified pieces; see [queue behavior](docs/queue-spec.md) and [seeding policy](docs/seeding-spec.md).
 
 If a torrent cannot activate, its record stays visible as `retrying` with a bounded retry delay. Other queued torrents can still start. The API exposes a generic error code and the delay without revealing tracker URLs or local paths.
 

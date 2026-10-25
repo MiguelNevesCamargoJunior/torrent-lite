@@ -37,6 +37,7 @@ pub struct ServiceCore {
     failures: AsyncMutex<HashMap<String, ActivationFailure>>,
     mutation: AsyncMutex<()>,
     max_active_downloads: usize,
+    max_seeding: usize,
 }
 
 pub const DEFAULT_MAX_ACTIVE_DOWNLOADS: usize = 3;
@@ -66,6 +67,7 @@ impl ActivationFailure {
 #[derive(Debug, Clone, Copy)]
 pub struct ServiceSettings {
     max_active_downloads: usize,
+    max_seeding: usize,
     download_limit_bps: Option<NonZeroU32>,
     upload_limit_bps: Option<NonZeroU32>,
 }
@@ -74,6 +76,7 @@ impl Default for ServiceSettings {
     fn default() -> Self {
         Self {
             max_active_downloads: DEFAULT_MAX_ACTIVE_DOWNLOADS,
+            max_seeding: 0,
             download_limit_bps: None,
             upload_limit_bps: None,
         }
@@ -103,6 +106,7 @@ impl ServiceSettings {
         }
         Ok(Self {
             max_active_downloads,
+            max_seeding: 0,
             download_limit_bps: limit(download_limit_kib)?,
             upload_limit_bps: limit(upload_limit_kib)?,
         })
@@ -114,6 +118,16 @@ impl ServiceSettings {
 
     pub fn upload_limit_bps(&self) -> Option<u32> {
         self.upload_limit_bps.map(NonZeroU32::get)
+    }
+
+    pub fn with_max_seeding(mut self, max_seeding: usize) -> anyhow::Result<Self> {
+        anyhow::ensure!(max_seeding <= 100, "max seeding must be between 0 and 100");
+        self.max_seeding = max_seeding;
+        Ok(self)
+    }
+
+    pub fn max_seeding(&self) -> usize {
+        self.max_seeding
     }
 }
 
@@ -199,6 +213,7 @@ impl ServiceCore {
             failures: AsyncMutex::new(HashMap::new()),
             mutation: AsyncMutex::new(()),
             max_active_downloads: settings.max_active_downloads,
+            max_seeding: settings.max_seeding,
         };
         for item in service.list()? {
             anyhow::ensure!(
@@ -485,6 +500,7 @@ impl ServiceCore {
 
     async fn reconcile_locked(&self, resolve_uncached_magnets: bool) -> anyhow::Result<()> {
         let mut active = 0;
+        let mut active_seeds = 0;
         for item in self.list()? {
             if item.desired != DesiredState::Running {
                 continue;
@@ -494,7 +510,12 @@ impl ServiceCore {
                 self.failures.lock().await.remove(&item.id);
                 let stats = handle.stats();
                 if stats.finished {
-                    if stats.state.to_string() != "paused" {
+                    if active_seeds < self.max_seeding {
+                        if stats.state.to_string() == "paused" {
+                            self.session.unpause(&handle).await?;
+                        }
+                        active_seeds += 1;
+                    } else if stats.state.to_string() != "paused" {
                         self.session.pause(&handle).await?;
                     }
                     continue;
@@ -534,7 +555,8 @@ impl ServiceCore {
                     };
                     self.record_activation(&item.id, result.is_ok()).await;
                     if result.is_ok() {
-                        active += 1;
+                        self.account_activated(&item.id, &mut active, &mut active_seeds)
+                            .await?;
                     }
                     continue;
                 }
@@ -573,9 +595,39 @@ impl ServiceCore {
                 };
                 self.record_activation(&item.id, result.is_ok()).await;
                 if result.is_ok() {
-                    active += 1;
+                    self.account_activated(&item.id, &mut active, &mut active_seeds)
+                        .await?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    async fn account_activated(
+        &self,
+        id: &str,
+        active_downloads: &mut usize,
+        active_seeds: &mut usize,
+    ) -> anyhow::Result<()> {
+        let handle = self
+            .handles
+            .lock()
+            .await
+            .get(id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("activated torrent has no handle"))?;
+        let stats = handle.stats();
+        if stats.finished {
+            if *active_seeds < self.max_seeding {
+                if stats.state.to_string() == "paused" {
+                    self.session.unpause(&handle).await?;
+                }
+                *active_seeds += 1;
+            } else if stats.state.to_string() != "paused" {
+                self.session.pause(&handle).await?;
+            }
+        } else {
+            *active_downloads += 1;
         }
         Ok(())
     }

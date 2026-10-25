@@ -102,6 +102,9 @@ enum Commands {
         /// Maximum number of incomplete torrents downloading at once.
         #[arg(long, default_value_t = 3)]
         max_active: usize,
+        /// Maximum completed torrents sharing verified pieces (default: disabled).
+        #[arg(long, default_value_t = 0)]
+        max_seeding: usize,
         /// Global download limit in KiB/s (omitted means unlimited).
         #[arg(long)]
         download_limit_kib: Option<u32>,
@@ -195,6 +198,7 @@ fn main() -> ExitCode {
             output,
             state,
             max_active,
+            max_seeding,
             download_limit_kib,
             upload_limit_kib,
         } => {
@@ -202,6 +206,7 @@ fn main() -> ExitCode {
                 output,
                 state,
                 max_active,
+                max_seeding,
                 download_limit_kib,
                 upload_limit_kib,
             );
@@ -456,6 +461,7 @@ fn run_serve(
     output: std::path::PathBuf,
     state: std::path::PathBuf,
     max_active: usize,
+    max_seeding: usize,
     download_limit_kib: Option<u32>,
     upload_limit_kib: Option<u32>,
 ) -> ExitCode {
@@ -466,7 +472,9 @@ fn run_serve(
         service_core::{ServiceCore, ServiceSettings},
         service_discovery::EndpointLease,
     };
-    let settings = match ServiceSettings::new(max_active, download_limit_kib, upload_limit_kib) {
+    let settings = match ServiceSettings::new(max_active, download_limit_kib, upload_limit_kib)
+        .and_then(|settings| settings.with_max_seeding(max_seeding))
+    {
         Ok(settings) => settings,
         Err(error) => {
             eprintln!("error: {error}");

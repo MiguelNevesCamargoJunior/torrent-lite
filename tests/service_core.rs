@@ -20,6 +20,14 @@ fn bandwidth_settings_reject_values_that_the_engine_cannot_apply() {
     assert!(ServiceSettings::new(1, Some(15), None).is_err());
     assert!(ServiceSettings::new(1, None, Some(15)).is_err());
     assert!(ServiceSettings::new(1, Some(4_194_304), None).is_err());
+    assert!(ServiceSettings::default().with_max_seeding(101).is_err());
+    assert_eq!(
+        ServiceSettings::default()
+            .with_max_seeding(1)
+            .unwrap()
+            .max_seeding(),
+        1
+    );
     assert_eq!(
         ServiceSettings::new(1, Some(4_194_303), None)
             .unwrap()
@@ -407,7 +415,7 @@ async fn failed_activation_keeps_its_record_and_does_not_block_the_queue() {
 }
 
 #[tokio::test]
-async fn completed_download_releases_queue_slot_without_client_mutation() {
+async fn completed_download_releases_queue_slot_and_seeding_is_bounded() {
     let workspace = tempfile::tempdir().unwrap();
     let source = workspace.path().join("source");
     let download = workspace.path().join("download");
@@ -486,7 +494,10 @@ async fn completed_download_releases_queue_slot_without_client_mutation() {
         &database,
         &download,
         DestinationPolicy::AllowLan,
-        ServiceSettings::new(1, Some(64), None).unwrap(),
+        ServiceSettings::new(1, Some(64), None)
+            .unwrap()
+            .with_max_seeding(1)
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -503,10 +514,33 @@ async fn completed_download_releases_queue_slot_without_client_mutation() {
     assert!(started.elapsed() >= Duration::from_millis(500));
     service.tick_queue().await.unwrap();
     assert!(service.metrics(&second.id).await.is_some());
+    assert_eq!(
+        service.metrics(&first.id).await.unwrap().observed_state,
+        "live"
+    );
     tokio::time::timeout(Duration::from_secs(25), service.wait_completed(&second.id))
         .await
         .unwrap()
         .unwrap();
+    service.tick_queue().await.unwrap();
+    assert_eq!(
+        service.metrics(&second.id).await.unwrap().observed_state,
+        "paused"
+    );
+    service.pause(&first.id).await.unwrap();
+    assert_eq!(
+        service.metrics(&second.id).await.unwrap().observed_state,
+        "live"
+    );
+    service.resume(&first.id).await.unwrap();
+    assert_eq!(
+        service.metrics(&first.id).await.unwrap().observed_state,
+        "live"
+    );
+    assert_eq!(
+        service.metrics(&second.id).await.unwrap().observed_state,
+        "paused"
+    );
     service.stop().await;
     tracker_task.abort();
     seeder.stop().await;
@@ -609,6 +643,11 @@ async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
     assert_eq!(metrics.total_bytes, content.len() as u64);
     assert!(metrics.finished);
     assert!(metrics.observed_state == "live" || metrics.observed_state == "paused");
+    service.tick_queue().await.unwrap();
+    assert_eq!(
+        service.metrics(&item.id).await.unwrap().observed_state,
+        "paused"
+    );
     assert!(service.proxy_connections() > 0);
     service.pause(&item.id).await.unwrap();
     assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);
