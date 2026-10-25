@@ -1,0 +1,32 @@
+# Engine assessment — librqbit 9.0.1
+
+Date: 2026-10-25. Status: **candidate; not qualified for production integration**.
+
+Evidence: `cargo info librqbit@9.0.1` fetched the published package. Its declared license is Apache-2.0. Default features include default-tls and http-api-client; disable unnecessary features when adding the engine. The engine is intentionally not yet a production dependency of the offline foundation.
+
+## Inspected source, not runtime proof
+
+| Requirement | Observation in published 9.0.1 source | Remaining qualification |
+|---|---|---|
+| Pause/resume, metadata and state | Session methods expose these concepts | Controlled transfer, crash and recovery tests |
+| Forced integrity on restart | SessionOptions exposes fastresume | Prove existing-piece validation and selective repair |
+| Per-torrent peer cap | Session peer_limit feeds torrent options | Prove bounded buffers and implement a global cap |
+| Private torrents | session.rs disables DHT/LSD for known-private metadata; live state checks private before PEX | Magnet metadata transition and tracker failover tests; private torrents rejected until qualified |
+| Storage confinement | filesystem/fs.rs init builds paths, creates parent directories and opens using std::fs::OpenOptions | No handle-relative race-resistant confinement observed here; custom storage using exposed StorageFactory is required before integration |
+| Outbound filtering | live peer path uses blocklist/allowlist; session builds its own reqwest client | These observations do not establish tracker DNS/redirect filtering; connector strategy or upstream extension required |
+
+This is a compatibility assessment against this project's stricter design, **not a vulnerability claim about upstream**. A public API inventory alone cannot prove the absence of protection elsewhere.
+
+## Next experiments
+
+1. Create a test-only adapter with discovery disabled and explicit loopback peers. Transfer a synthetic payload and assert bytes and piece hashes.
+2. Stop/restart with existing data; corrupt a cross-file piece, verify and assert only invalid data is fetched again.
+3. Test StorageFactory with Windows junction replacement and POSIX symlink races before allowing disk writes to untrusted paths.
+4. Prove all tracker/peer connection routes apply the destination policy after DNS and each redirect. A peer blocklist alone is insufficient.
+5. Bound metadata parsing, buffers, init concurrency and aggregate peers; verify settings under load.
+6. Review the selected dependency graph and licenses; build with fixed features; then measure actual resource usage.
+
+If the engine cannot satisfy the binding design without substantial changes, document the exact gap and evaluate upstream contribution or another engine with the user. Do not silently weaken the design or claim download functionality.
+
+Sources: https://docs.rs/librqbit/9.0.1/librqbit/ and the published crate's src/session.rs, src/storage/filesystem/fs.rs, src/torrent_state/live/mod.rs. Upstream: https://github.com/ikatson/rqbit.
+

@@ -20,6 +20,16 @@ The first milestone establishes input validation and an offline inspection CLI, 
 
 Integrity before fast resume; bounded memory before unlimited concurrency; tests before implementation. Torrent hashes validate content against metadata, not against malware. Performance targets are hypotheses until measured under published conditions.
 
+## Try the current offline CLI
+
+Requires Rust 1.91.1 or later. This command parses a synthetic magnet and makes no network connection:
+
+```sh
+cargo run --locked -- inspect-magnet "magnet:?xt=urn:btih:000102030405060708090a0b0c0d0e0f10111213&dn=Example" --json
+```
+
+The library also validates portable path components and rejects file/directory collisions. These are lexical checks, not filesystem confinement. `.torrent` inspection and actual downloads are not available yet.
+
 ## License
 
 Apache-2.0. Dependencies retain their respective licenses and attribution.
