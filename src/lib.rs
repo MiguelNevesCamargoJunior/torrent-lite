@@ -3,6 +3,7 @@
 #[cfg(feature = "durable-engine")]
 pub mod engine_storage;
 pub mod magnet;
+pub mod network_policy;
 pub mod path_policy;
 pub mod safe_storage;
 #[cfg(feature = "state-store")]
