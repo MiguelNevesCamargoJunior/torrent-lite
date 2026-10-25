@@ -10,6 +10,8 @@ First tests: public IPv4/IPv6 accepted; loopback, private, link-local, documenta
 
 The experimental proxy now implements SOCKS5 CONNECT with a 256-bit random password, loopback-only binding, bounded handshakes and 150 concurrent sessions. It resolves domain requests itself, filters each concrete IP, then connects to that IP so DNS cannot change the selected socket destination. Tests cover authentication, IP and DNS denial, and an explicit LAN-mode relay. A combined local-peer qualification test is being added for the engine and persisted storage; public trackers remain disabled in that test. Do not turn on unrestricted engine discovery based on the proxy test alone.
 
+Before public trackers are enabled, sanitize the magnet and metainfo supplied to the engine. Retain only validated HTTP(S) trackers and return the count of dropped trackers for a visible warning. A `.torrent` rewrite must preserve the raw `info` bytes and therefore the v1 infohash. Reject private torrents until their tracker isolation is proven. Keep metadata size and tracker count bounded. Validate the output again and assert the original hash remains unchanged. This is a preprocessing gate; the proxy still checks each concrete network destination and each redirect.
+
 Source of address classes: IANA IPv4 and IPv6 Special-Purpose Address Registries, consulted 2026-10-25. Update the policy when those registries change.
 
 - https://www.iana.org/assignments/iana-ipv4-special-registry/
