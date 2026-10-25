@@ -401,7 +401,7 @@ fn run_client(action: ClientAction, state: std::path::PathBuf) -> ExitCode {
                             let selected = view
                                 .only_files
                                 .as_ref()
-                                .is_none_or(|items| items.contains(&index));
+                                .is_none_or(|items| items.binary_search(&index).is_ok());
                             format!(
                                 "{} {index}  {} bytes  {}",
                                 if selected { "*" } else { " " },
