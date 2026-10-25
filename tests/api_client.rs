@@ -44,6 +44,19 @@ async fn client_discovers_running_service_and_uses_same_state() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].id, item.id);
     assert_eq!(rows[0].desired, "paused");
+    let status = client.status().await.unwrap();
+    assert_eq!(status.registered, 1);
+    assert_eq!(status.paused, 1);
+    let cli_status = Command::new(env!("CARGO_BIN_EXE_torrent-lite"))
+        .arg("status")
+        .arg("--state")
+        .arg(&database)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(cli_status.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&cli_status.stdout).unwrap();
+    assert_eq!(parsed["registered"], 1);
     client.pause(&item.id).await.unwrap();
     client.remove(&item.id).await.unwrap();
     assert!(client.list().await.unwrap().is_empty());
@@ -59,7 +72,15 @@ async fn client_discovers_running_service_and_uses_same_state() {
     let added = client.list().await.unwrap();
     assert_eq!(added.len(), 1);
     assert_eq!(added[0].desired, "paused");
-    drop(lease);
-    drop(api);
+    let mut shutdown = api.shutdown_receiver();
+    let stop_task = tokio::spawn(async move { client.stop_service().await });
+    tokio::time::timeout(std::time::Duration::from_secs(3), shutdown.changed())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(*shutdown.borrow());
+    api.close().await;
     service.stop().await;
+    drop(lease);
+    stop_task.await.unwrap().unwrap();
 }

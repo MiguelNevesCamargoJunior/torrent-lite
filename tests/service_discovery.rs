@@ -58,6 +58,21 @@ async fn endpoint_is_private_versioned_and_detects_tampering() {
 
 struct ChildGuard(Child);
 
+fn start_service(root: &std::path::Path, database: &std::path::Path) -> ChildGuard {
+    ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_torrent-lite"))
+            .arg("serve")
+            .arg("--output")
+            .arg(root)
+            .arg("--state")
+            .arg(database)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    )
+}
+
 impl Drop for ChildGuard {
     fn drop(&mut self) {
         let _ = self.0.kill();
@@ -122,21 +137,7 @@ async fn forced_stop_then_restart_replaces_stale_endpoint() {
     let root = workspace.path().join("download");
     std::fs::create_dir(&root).unwrap();
     let database = workspace.path().join("state.db");
-    let start = || {
-        ChildGuard(
-            Command::new(env!("CARGO_BIN_EXE_torrent-lite"))
-                .arg("serve")
-                .arg("--output")
-                .arg(&root)
-                .arg("--state")
-                .arg(&database)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap(),
-        )
-    };
-    let mut first = start();
+    let mut first = start_service(&root, &database);
     let before = await_new_endpoint(&database, None).await;
     assert!(list_over_http(&before).await.starts_with("HTTP/1.1 200"));
     let add_one = post_over_http(
@@ -173,7 +174,7 @@ async fn forced_stop_then_restart_replaces_stale_endpoint() {
     assert!(!before_crash.contains("0000000000000000000000000000000000000001"));
     first.0.kill().unwrap();
     first.0.wait().unwrap();
-    let second = start();
+    let second = start_service(&root, &database);
     let after = await_new_endpoint(&database, Some(&before.token)).await;
     assert_ne!(after.token, before.token);
     let recovered = list_over_http(&after).await;
@@ -181,5 +182,33 @@ async fn forced_stop_then_restart_replaces_stale_endpoint() {
     assert!(recovered.contains("0000000000000000000000000000000000000002"));
     assert!(recovered.contains("\"desired\":\"paused\""));
     assert!(!recovered.contains("0000000000000000000000000000000000000001"));
+    drop(second);
+}
+
+#[tokio::test]
+async fn authenticated_stop_exits_and_releases_endpoint_for_restart() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().join("download");
+    std::fs::create_dir(&root).unwrap();
+    let database = workspace.path().join("state.db");
+    let mut first = start_service(&root, &database);
+    let before = await_new_endpoint(&database, None).await;
+    let stopped = post_over_http(&before, "/api/v1/service/stop", "").await;
+    assert!(stopped.starts_with("HTTP/1.1 202"));
+    let exit = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if let Some(status) = first.0.try_wait().unwrap() {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("service did not exit after authenticated stop");
+    assert!(exit.success());
+    assert!(EndpointLease::read(&database).is_err());
+    let second = start_service(&root, &database);
+    let after = await_new_endpoint(&database, Some(&before.token)).await;
+    assert!(list_over_http(&after).await.starts_with("HTTP/1.1 200"));
     drop(second);
 }

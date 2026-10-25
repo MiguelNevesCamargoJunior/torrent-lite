@@ -120,6 +120,7 @@ async fn local_dashboard_requires_ephemeral_path_and_restricts_browser() {
     assert!(page.contains("cache-control: no-store"));
     assert!(page.contains("Transferências"));
     assert!(page.contains("Compartilhando"));
+    assert!(page.contains("id=\"stop-service\""));
     assert!(page.contains("setAttribute('role','progressbar')"));
     assert!(!page.contains("<script src="));
     assert!(!page.contains("<link rel=\"stylesheet\""));
@@ -149,6 +150,15 @@ async fn local_dashboard_requires_ephemeral_path_and_restricts_browser() {
     let csrf = csrf_body["token"].as_str().unwrap();
     assert_ne!(csrf, api.token());
     assert_eq!(csrf.len(), 64);
+    let stop_without_token = client
+        .post(format!("{base}stop"))
+        .header("origin", format!("http://{addr}"))
+        .header("content-type", "application/json")
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stop_without_token.status(), reqwest::StatusCode::FORBIDDEN);
     let item = service
         .add_magnet_with_pause(
             "magnet:?xt=urn:btih:0000000000000000000000000000000000000001&tr=https://tracker.example/announce",

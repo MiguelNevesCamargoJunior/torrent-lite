@@ -52,6 +52,8 @@ fn read_only_stdio_server_advertises_only_read_tools() {
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
     assert!(names.contains(&"torrent_list"));
+    assert!(names.contains(&"service_status"));
+    assert!(!names.contains(&"service_stop"));
     assert!(!names.contains(&"torrent_remove"));
     assert!(!names.contains(&"torrent_add_magnet"));
     let refused = messages.iter().find(|message| message["id"] == 3).unwrap();

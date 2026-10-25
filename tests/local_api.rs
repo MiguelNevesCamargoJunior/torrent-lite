@@ -45,6 +45,56 @@ async fn request_body(
 }
 
 #[tokio::test]
+async fn service_stop_requires_auth_and_exact_origin() {
+    let workspace = tempfile::tempdir().unwrap();
+    let output = workspace.path().join("download");
+    std::fs::create_dir(&output).unwrap();
+    let service = Arc::new(
+        ServiceCore::open(
+            &workspace.path().join("state.db"),
+            &output,
+            DestinationPolicy::PublicOnly,
+        )
+        .await
+        .unwrap(),
+    );
+    let api = LocalApi::bind(service.clone()).await.unwrap();
+    let shutdown = api.shutdown_receiver();
+    let addr = api.local_addr();
+    let host = format!("Host: {addr}\r\n");
+    let token = format!("Authorization: Bearer {}\r\n", api.token());
+    assert!(
+        request_target(addr, "POST", "/api/v1/service/stop", &host)
+            .await
+            .starts_with("HTTP/1.1 401")
+    );
+    assert!(
+        request_target(
+            addr,
+            "POST",
+            "/api/v1/service/stop",
+            &format!("{host}{token}Origin: http://invalid.example\r\n")
+        )
+        .await
+        .starts_with("HTTP/1.1 403")
+    );
+    assert!(!*shutdown.borrow());
+    assert!(
+        request_target(
+            addr,
+            "POST",
+            "/api/v1/service/stop",
+            &format!("{host}{token}")
+        )
+        .await
+        .starts_with("HTTP/1.1 202")
+    );
+    assert!(*shutdown.borrow());
+    drop(api);
+    service.stop().await;
+}
+
+#[tokio::test]
 async fn file_selection_api_requires_auth_and_pause_and_preserves_valid_choice() {
     let workspace = tempfile::tempdir().unwrap();
     let output = workspace.path().join("download");

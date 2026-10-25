@@ -45,6 +45,20 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Summarize the running local service.
+    #[cfg(feature = "api-client")]
+    Status {
+        #[arg(long)]
+        state: std::path::PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Gracefully stop the running local service.
+    #[cfg(feature = "api-client")]
+    Stop {
+        #[arg(long)]
+        state: std::path::PathBuf,
+    },
     /// Show indexed files and the persisted selection for a torrent.
     #[cfg(feature = "api-client")]
     Files {
@@ -174,6 +188,10 @@ fn main() -> ExitCode {
         } => return run_client(ClientAction::Add(source, paused), state),
         #[cfg(feature = "api-client")]
         Commands::List { state, json } => return run_client(ClientAction::List(json), state),
+        #[cfg(feature = "api-client")]
+        Commands::Status { state, json } => return run_client(ClientAction::Status(json), state),
+        #[cfg(feature = "api-client")]
+        Commands::Stop { state } => return run_client(ClientAction::Stop, state),
         #[cfg(feature = "api-client")]
         Commands::Files { id, state, json } => {
             return run_client(ClientAction::Files(id, json), state);
@@ -333,6 +351,8 @@ fn run_mcp(state: std::path::PathBuf, read_only: bool) -> ExitCode {
 enum ClientAction {
     Add(String, bool),
     List(bool),
+    Status(bool),
+    Stop,
     Files(String, bool),
     SelectFiles(String, Vec<usize>, bool),
     Pause(String),
@@ -391,6 +411,27 @@ fn run_client(action: ClientAction, state: std::path::PathBuf) -> ExitCode {
                         .collect::<Vec<_>>()
                         .join("\n"))
                 }
+            }
+            ClientAction::Status(json) => {
+                let status = client.status().await?;
+                if json {
+                    Ok(serde_json::to_string(&status)?)
+                } else {
+                    Ok(format!(
+                        "{} torrents · {} downloading · {} seeding · {} resolving · {} queued · {} paused · {} retrying",
+                        status.registered,
+                        status.downloading,
+                        status.seeding,
+                        status.resolving,
+                        status.queued,
+                        status.paused,
+                        status.retrying
+                    ))
+                }
+            }
+            ClientAction::Stop => {
+                client.stop_service().await?;
+                Ok("Service stopped".to_owned())
             }
             ClientAction::Files(id, json) => {
                 let view = client.files(&id).await?;
@@ -510,12 +551,21 @@ fn run_serve(
             }
         };
         println!("Service listening on http://{}", api.local_addr());
+        let mut shutdown = api.shutdown_receiver();
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
         interval.tick().await;
         let mut queue_error_reported = false;
         let signal = loop {
+            if *shutdown.borrow() {
+                break Ok(());
+            }
             tokio::select! {
                 signal = tokio::signal::ctrl_c() => break signal,
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        break Ok(());
+                    }
+                }
                 _ = interval.tick() => {
                     if service.tick_queue().await.is_err() {
                         if !queue_error_reported {
@@ -528,9 +578,9 @@ fn run_serve(
                 }
             }
         };
-        drop(lease);
-        drop(api);
+        api.close().await;
         service.stop().await;
+        drop(lease);
         signal.map_err(anyhow::Error::from)
     });
     if result.is_err() {

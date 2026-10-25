@@ -91,6 +91,7 @@ impl BrowserUi {
             .route("/{key}/", get(page))
             .route("/{key}/data", get(data))
             .route("/{key}/csrf", get(csrf_token))
+            .route("/{key}/stop", post(stop_service))
             .route("/{key}/add-magnet", post(add_magnet))
             .route("/{key}/add-torrent", post(add_torrent))
             .route("/{key}/torrents/{id}/{action}", post(mutate_torrent))
@@ -221,6 +222,26 @@ fn check_mutation(
         return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
     Ok(())
+}
+
+async fn stop_service(
+    State(state): State<UiState>,
+    RoutePath(key): RoutePath<String>,
+    request: Request,
+) -> Result<(HeaderMap, StatusCode), StatusCode> {
+    check_mutation(request.headers(), &key, &state, "application/json")?;
+    let bytes = to_bytes(request.into_body(), 64)
+        .await
+        .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
+    if bytes.as_ref() != b"{}" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    state
+        .client
+        .stop_service()
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    Ok((response_headers(), StatusCode::NO_CONTENT))
 }
 
 async fn add_magnet(

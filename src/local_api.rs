@@ -24,7 +24,11 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::{net::TcpListener, sync::Semaphore, task::JoinHandle};
+use tokio::{
+    net::TcpListener,
+    sync::{Semaphore, watch},
+    task::JoinHandle,
+};
 
 const MAX_ADD_BODY_BYTES: usize = 11 * 1024 * 1024;
 
@@ -35,6 +39,7 @@ struct ApiState {
     host: Arc<str>,
     origin: Arc<str>,
     add_permits: Arc<Semaphore>,
+    shutdown: watch::Sender<bool>,
 }
 
 #[derive(Deserialize)]
@@ -88,7 +93,9 @@ pub struct TorrentView {
 pub struct LocalApi {
     addr: SocketAddr,
     token: String,
-    task: JoinHandle<()>,
+    task: Option<JoinHandle<()>>,
+    shutdown: watch::Receiver<bool>,
+    server_shutdown: watch::Sender<bool>,
 }
 
 impl LocalApi {
@@ -101,14 +108,18 @@ impl LocalApi {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
+        let (shutdown_sender, shutdown) = watch::channel(false);
+        let (server_shutdown, mut server_shutdown_rx) = watch::channel(false);
         let state = ApiState {
             service,
             token: Arc::from(token.as_str()),
             host: Arc::from(addr.to_string()),
             origin: Arc::from(format!("http://{addr}")),
             add_permits: Arc::new(Semaphore::new(2)),
+            shutdown: shutdown_sender,
         };
         let router = Router::new()
+            .route("/api/v1/service/stop", post(stop_service))
             .route("/api/v1/torrents", get(list).post(add))
             .route("/api/v1/torrents/{id}/remove", post(remove))
             .route("/api/v1/torrents/{id}/pause", post(pause))
@@ -119,9 +130,23 @@ impl LocalApi {
             .layer(from_fn(json_errors))
             .with_state(state);
         let task = tokio::spawn(async move {
-            let _ = axum::serve(listener, router).await;
+            let _ = axum::serve(listener, router)
+                .with_graceful_shutdown(async move {
+                    while !*server_shutdown_rx.borrow_and_update() {
+                        if server_shutdown_rx.changed().await.is_err() {
+                            break;
+                        }
+                    }
+                })
+                .await;
         });
-        Ok(Self { addr, token, task })
+        Ok(Self {
+            addr,
+            token,
+            task: Some(task),
+            shutdown,
+            server_shutdown,
+        })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -132,6 +157,31 @@ impl LocalApi {
     pub fn token(&self) -> &str {
         &self.token
     }
+
+    pub fn shutdown_receiver(&self) -> watch::Receiver<bool> {
+        self.shutdown.clone()
+    }
+
+    pub async fn close(mut self) {
+        self.server_shutdown.send_replace(true);
+        if let Some(mut task) = self.task.take()
+            && tokio::time::timeout(Duration::from_secs(5), &mut task)
+                .await
+                .is_err()
+        {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+}
+
+async fn stop_service(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    authorize(&headers, &state)?;
+    state.shutdown.send_replace(true);
+    Ok(StatusCode::ACCEPTED)
 }
 
 async fn json_errors(request: Request, next: Next) -> Response {
@@ -171,7 +221,9 @@ async fn json_errors(request: Request, next: Next) -> Response {
 
 impl Drop for LocalApi {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
     }
 }
 

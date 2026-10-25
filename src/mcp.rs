@@ -47,6 +47,7 @@ impl McpServer {
                 "torrent_verify",
                 "torrent_remove",
                 "torrent_select_files",
+                "service_stop",
             ] {
                 tool_router.remove_route(name);
             }
@@ -88,6 +89,24 @@ impl McpServer {
         let result: anyhow::Result<String> =
             async { Ok(serde_json::to_string(&self.client()?.list().await?)?) }.await;
         result.map(ok).unwrap_or_else(|_| failed())
+    }
+
+    #[tool(description = "Summarize the running local service")]
+    async fn service_status(&self) -> CallToolResult {
+        let result: anyhow::Result<String> =
+            async { Ok(serde_json::to_string(&self.client()?.status().await?)?) }.await;
+        result.map(ok).unwrap_or_else(|_| failed())
+    }
+
+    #[tool(description = "Gracefully stop the running local service")]
+    async fn service_stop(&self) -> CallToolResult {
+        if self.read_only {
+            return failed();
+        }
+        match self.client() {
+            Ok(client) if client.stop_service().await.is_ok() => ok("Service stopped".to_owned()),
+            _ => failed(),
+        }
     }
 
     #[tool(description = "Show status of one torrent by ID")]

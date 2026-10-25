@@ -5,11 +5,27 @@ use crate::{
     service_discovery::EndpointLease,
 };
 use anyhow::{Context, ensure};
-use std::{net::SocketAddr, path::Path, time::Duration};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ServiceStatusView {
+    pub registered: usize,
+    pub downloading: usize,
+    pub seeding: usize,
+    pub resolving: usize,
+    pub queued: usize,
+    pub paused: usize,
+    pub retrying: usize,
+}
 
 pub struct LocalClient {
     addr: SocketAddr,
     token: String,
+    database: PathBuf,
     http: reqwest::Client,
 }
 
@@ -24,6 +40,7 @@ impl LocalClient {
         Ok(Self {
             addr: endpoint.addr,
             token: endpoint.token,
+            database: database.to_path_buf(),
             http,
         })
     }
@@ -37,6 +54,65 @@ impl LocalClient {
             .await?
             .error_for_status()?;
         Ok(response.json().await?)
+    }
+
+    pub async fn status(&self) -> anyhow::Result<ServiceStatusView> {
+        let rows = self.list().await?;
+        Ok(ServiceStatusView {
+            registered: rows.len(),
+            downloading: rows
+                .iter()
+                .filter(|row| {
+                    row.finished != Some(true) && row.observed_state.as_deref() == Some("live")
+                })
+                .count(),
+            seeding: rows
+                .iter()
+                .filter(|row| {
+                    row.finished == Some(true) && row.observed_state.as_deref() == Some("live")
+                })
+                .count(),
+            resolving: rows
+                .iter()
+                .filter(|row| row.observed_state.as_deref() == Some("resolving"))
+                .count(),
+            queued: rows
+                .iter()
+                .filter(|row| row.observed_state.as_deref() == Some("queued"))
+                .count(),
+            paused: rows.iter().filter(|row| row.desired == "paused").count(),
+            retrying: rows
+                .iter()
+                .filter(|row| row.observed_state.as_deref() == Some("retrying"))
+                .count(),
+        })
+    }
+
+    pub async fn stop_service(&self) -> anyhow::Result<()> {
+        let response = self
+            .http
+            .post(format!("http://{}/api/v1/service/stop", self.addr))
+            .bearer_auth(&self.token)
+            .send()
+            .await?;
+        ensure!(
+            response.status() == reqwest::StatusCode::ACCEPTED,
+            "service rejected stop with status {}",
+            response.status()
+        );
+        drop(response);
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                match EndpointLease::read(&self.database) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                    Ok(endpoint) if endpoint.token != self.token => break,
+                    _ => tokio::time::sleep(Duration::from_millis(50)).await,
+                }
+            }
+        })
+        .await
+        .context("service did not stop within 15 seconds")?;
+        Ok(())
     }
 
     pub async fn files(&self, id: &str) -> anyhow::Result<FilesView> {

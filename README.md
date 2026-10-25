@@ -72,6 +72,7 @@ It listens only on `127.0.0.1`, publishes a protected endpoint record beside the
 cargo run --locked --features api-client -- add "magnet:?xt=urn:btih:HASH&tr=https%3A%2F%2Ftracker.example%2Fannounce" --state path/to/state.db
 cargo run --locked --features api-client -- add path/to/file.torrent --state path/to/state.db
 cargo run --locked --features api-client -- list --state path/to/state.db
+cargo run --locked --features api-client -- status --state path/to/state.db
 cargo run --locked --features api-client -- files TORRENT_ID --state path/to/state.db
 cargo run --locked --features api-client -- select-files TORRENT_ID 0 2 --state path/to/state.db
 cargo run --locked --features api-client -- select-files TORRENT_ID --all --state path/to/state.db
@@ -79,9 +80,10 @@ cargo run --locked --features api-client -- pause TORRENT_ID --state path/to/sta
 cargo run --locked --features api-client -- resume TORRENT_ID --state path/to/state.db
 cargo run --locked --features api-client -- verify TORRENT_ID --state path/to/state.db
 cargo run --locked --features api-client -- remove TORRENT_ID --state path/to/state.db
+cargo run --locked --features api-client -- stop --state path/to/state.db
 ```
 
-`add` accepts `--paused`. `files` shows zero-based file indices; `select-files` requires a paused torrent and available metainfo. Choices survive restarts, and `--all` restores every file; see the [selection contract](docs/selected-files-spec.md). `verify` fully rechecks registered `.torrent` data and magnets whose metainfo has resolved, then restores the prior pause/running intent. Resolved magnet metainfo is cached in the state database so a restarted service can recheck without recontacting a tracker. Removing a record preserves downloaded files. For a local dashboard, leave the service running and start:
+`status` reports the running service's current counts; `stop` requests a graceful shutdown and waits for its protected endpoint to disappear. `add` accepts `--paused`. `files` shows zero-based file indices; `select-files` requires a paused torrent and available metainfo. Choices survive restarts, and `--all` restores every file; see the [selection contract](docs/selected-files-spec.md). `verify` fully rechecks registered `.torrent` data and magnets whose metainfo has resolved, then restores the prior pause/running intent. Resolved magnet metainfo is cached in the state database so a restarted service can recheck without recontacting a tracker. Removing a record preserves downloaded files. For a local dashboard, leave the service running and start:
 
 ```sh
 cargo run --locked --features browser-ui -- ui --state path/to/state.db
@@ -95,7 +97,7 @@ For MCP clients that launch a stdio command:
 cargo run --locked --features mcp -- mcp --state path/to/state.db --read-only
 ```
 
-Omit `--read-only` to expose add-magnet, file selection, pause, resume and remove tools. File listing works in read-only mode. Standard output is reserved for MCP protocol messages. The service must already be running.
+Omit `--read-only` to expose add-magnet, file selection, pause, resume, remove and service stop tools. File listing and service status work in read-only mode. Standard output is reserved for MCP protocol messages. The service must already be running.
 
 ## License
 
