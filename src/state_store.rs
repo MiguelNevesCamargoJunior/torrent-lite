@@ -715,7 +715,7 @@ impl StateStore {
 
 #[cfg(test)]
 mod crash_tests {
-    use super::{AddInput, DesiredState, FileIdentity, StateStore};
+    use super::{AddInput, DesiredState, FileIdentity, StateStore, StoreError};
     use crate::safe_storage::SafeRoot;
     use std::{io::Write, process::Command};
 
@@ -729,6 +729,10 @@ mod crash_tests {
         let root = std::path::PathBuf::from(std::env::var_os("TORRENT_LITE_CRASH_ROOT").unwrap());
         let database = std::path::PathBuf::from(std::env::var_os("TORRENT_LITE_CRASH_DB").unwrap());
         std::fs::write(root.join("child-started"), b"yes").unwrap();
+        if case == "migration_commit" {
+            let _ = StateStore::open(&database).unwrap();
+            return;
+        }
         let mut store = StateStore::open(&database).unwrap();
         match case.as_str() {
             "register" => {
@@ -818,5 +822,57 @@ mod crash_tests {
                 assert!(store.load_file_identities(&id).unwrap().is_empty());
             }
         }
+    }
+
+    #[test]
+    fn interrupted_migration_preserves_old_database_and_backup() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().join("downloads");
+        std::fs::create_dir(&root).unwrap();
+        let database = workspace.path().join("state.db");
+        let id = StateStore::open(&database)
+            .unwrap()
+            .register(AddInput::Magnet(MAGNET), &root, true)
+            .unwrap()
+            .id;
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute_batch("DROP TABLE file_selection; PRAGMA user_version=3;")
+            .unwrap();
+        drop(connection);
+        let output = Command::new(std::env::current_exe().unwrap())
+            .arg("crash_child")
+            .arg("--nocapture")
+            .env("TORRENT_LITE_CRASH_CASE", "migration_commit")
+            .env("TORRENT_LITE_CRASH_ROOT", &root)
+            .env("TORRENT_LITE_CRASH_DB", &database)
+            .output()
+            .unwrap();
+        assert!(root.join("child-started").exists(), "{output:?}");
+        assert_eq!(output.status.code(), Some(86), "{output:?}");
+        let backup = workspace.path().join("state.db.v3.bak");
+        for path in [&database, &backup] {
+            let connection = rusqlite::Connection::open(path).unwrap();
+            let version: i64 = connection
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, 3, "{}", path.display());
+            let persisted_id: String = connection
+                .query_row("SELECT id FROM torrents", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(persisted_id, id);
+            let table_count: i64 = connection
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE name='file_selection'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(table_count, 0);
+        }
+        assert!(matches!(
+            StateStore::open(&database),
+            Err(StoreError::MigrationBackupExists)
+        ));
     }
 }
