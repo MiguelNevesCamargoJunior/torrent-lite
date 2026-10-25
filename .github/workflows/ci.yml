@@ -64,6 +64,8 @@ jobs:
         run: cargo +1.91.1 test --locked
       - name: Durable state tests
         run: cargo +1.91.1 test --locked --features state-store --test state_store
+      - name: Transaction crash tests
+        run: cargo +1.91.1 test --locked --features state-store --lib state_store::crash_tests
       - name: Local peer engine qualification
         run: cargo +1.91.1 test --locked --features engine-qualification --test engine_local
       - name: Persistent engine storage qualification

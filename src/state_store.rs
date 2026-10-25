@@ -697,3 +697,107 @@ impl StateStore {
         Ok(output)
     }
 }
+
+#[cfg(test)]
+mod crash_tests {
+    use super::{AddInput, DesiredState, FileIdentity, StateStore};
+    use std::{fs::File, process::Command};
+
+    const MAGNET: &str = "magnet:?xt=urn:btih:0000000000000000000000000000000000000001";
+
+    #[test]
+    fn crash_child() {
+        let Ok(case) = std::env::var("TORRENT_LITE_CRASH_CASE") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(std::env::var_os("TORRENT_LITE_CRASH_ROOT").unwrap());
+        let database = std::path::PathBuf::from(std::env::var_os("TORRENT_LITE_CRASH_DB").unwrap());
+        std::fs::write(root.join("child-started"), b"yes").unwrap();
+        let mut store = StateStore::open(&database).unwrap();
+        match case.as_str() {
+            "register" => {
+                store
+                    .register(AddInput::Magnet(MAGNET), &root, true)
+                    .unwrap();
+            }
+            "set_intent" => {
+                store
+                    .set_intent(
+                        &std::env::var("TORRENT_LITE_CRASH_ID").unwrap(),
+                        DesiredState::Running,
+                    )
+                    .unwrap();
+            }
+            "remove" => {
+                store
+                    .remove(&std::env::var("TORRENT_LITE_CRASH_ID").unwrap())
+                    .unwrap();
+            }
+            "file_identity" => {
+                let file = File::open(root.join("piece.bin")).unwrap();
+                let identity = FileIdentity::from_file(&file).unwrap();
+                store
+                    .record_file_identity(
+                        &std::env::var("TORRENT_LITE_CRASH_ID").unwrap(),
+                        0,
+                        &["piece.bin"],
+                        4,
+                        identity,
+                    )
+                    .unwrap();
+            }
+            _ => panic!("unknown crash case"),
+        }
+    }
+
+    #[test]
+    fn interrupted_mutation_rolls_back_and_releases_lock() {
+        for case in ["register", "set_intent", "remove", "file_identity"] {
+            let workspace = tempfile::tempdir().unwrap();
+            let root = workspace.path().join("downloads");
+            std::fs::create_dir(&root).unwrap();
+            std::fs::write(root.join("piece.bin"), b"data").unwrap();
+            let database = workspace.path().join("state.db");
+            let id = if case == "register" {
+                drop(StateStore::open(&database).unwrap());
+                String::new()
+            } else {
+                let mut store = StateStore::open(&database).unwrap();
+                store
+                    .register(AddInput::Magnet(MAGNET), &root, true)
+                    .unwrap()
+                    .id
+            };
+            let output = Command::new(std::env::current_exe().unwrap())
+                .arg("crash_child")
+                .arg("--nocapture")
+                .env("TORRENT_LITE_CRASH_CASE", case)
+                .env("TORRENT_LITE_CRASH_ROOT", &root)
+                .env("TORRENT_LITE_CRASH_DB", &database)
+                .env("TORRENT_LITE_CRASH_ID", &id)
+                .output()
+                .unwrap();
+            assert!(
+                root.join("child-started").exists(),
+                "child did not reach {case}: {:?}",
+                output
+            );
+            assert_eq!(
+                output.status.code(),
+                Some(86),
+                "child did not crash before {case} commit: {:?}",
+                output
+            );
+            let store = StateStore::open(&database).unwrap();
+            let records = store.recover().unwrap();
+            if case == "register" {
+                assert!(records.is_empty());
+            } else {
+                assert_eq!(records.len(), 1);
+                assert_eq!(records[0].id, id);
+                assert_eq!(records[0].desired, DesiredState::Paused);
+                assert!(store.load_file_identities(&id).unwrap().is_empty());
+            }
+        }
+    }
+}
