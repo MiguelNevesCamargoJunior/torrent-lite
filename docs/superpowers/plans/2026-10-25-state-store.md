@@ -4,7 +4,7 @@ Data: 2026-10-25. Escopo: intenção e registro de torrents; integração com o 
 
 ## Contrato
 
-- Um único dono abre o banco em um diretório de estado escolhido explicitamente. O lock de processo será um gate antes de expor `serve`.
+- Um único dono abre o banco em um diretório de estado escolhido explicitamente. O handle de lock acompanha a conexão por toda a vida do serviço.
 - `register` recebe hash v1 validado, ID estável, metadados/origem limitados e intenção inicial. O mesmo hash devolve o registro existente se os parâmetros forem idênticos; dados divergentes produzem conflito.
 - `set_intent` troca `running`/`paused` em transação; operação repetida é idempotente. A intenção é distinta do estado observado do motor.
 - `remove` grava tombstone em transação e nunca apaga o conteúdo. Um novo `register` do mesmo hash tombstoned produz conflito até uma política explícita de novo cadastro ser definida.
@@ -15,7 +15,7 @@ Data: 2026-10-25. Escopo: intenção e registro de torrents; integração com o 
 
 1. Testes com arquivo SQLite temporário para cadastro idempotente, conflito de origem/destino, limite de 100 registros e tamanho de metadados.
 2. Testes de persistência após fechar/reabrir para pausa, retomada e tombstone; `recover` não inclui removidos. Testar versão futura sem alterar o arquivo.
-3. Implementar esquema v1 e operações transacionais por uma conexão dona do serviço. SQL parametrizado e `PRAGMA foreign_keys=ON`; configurar durabilidade e tempo limite de lock explicitamente.
+3. Implementar esquema v1 e operações transacionais por uma conexão dona do serviço. SQL parametrizado e `PRAGMA foreign_keys=ON`; configurar durabilidade, lock exclusivo de processo e tempo limite de banco explicitamente.
 4. Rodar fmt, clippy e testes nos três SOs; documentar o que ainda falta para recuperação de processo completo, lock, backup de migração e integração de identidades de arquivo.
 
 Este milestone não habilita downloads pela CLI até que armazenamento, destinos de rede e a reconciliação com o motor estejam qualificados.

@@ -2,7 +2,11 @@
 
 use crate::{InputError, magnet::Magnet, torrent_file::inspect_torrent};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
-use std::{path::Path, time::Duration};
+use std::{
+    fs::{File, OpenOptions as FileOpenOptions, TryLockError},
+    path::Path,
+    time::Duration,
+};
 
 const SCHEMA_VERSION: i64 = 1;
 const APPLICATION_ID: i64 = 0x746c6974;
@@ -96,14 +100,37 @@ pub enum StoreError {
     Limit,
     #[error("torrent ID does not exist")]
     NotFound,
+    #[error("state database is already owned by another process")]
+    Busy,
 }
 
 pub struct StateStore {
     connection: Connection,
+    _lock_file: File,
 }
 
 impl StateStore {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
+        let mut lock_name = path
+            .file_name()
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "database path has no file name",
+                )
+            })?
+            .to_os_string();
+        lock_name.push(".lock");
+        let lock_file = FileOpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path.with_file_name(lock_name))?;
+        match lock_file.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => return Err(StoreError::Busy),
+            Err(TryLockError::Error(error)) => return Err(StoreError::Io(error)),
+        }
         let existed = path.exists();
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
@@ -138,7 +165,10 @@ impl StateStore {
         connection.execute_batch(
             "PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL;",
         )?;
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            _lock_file: lock_file,
+        })
     }
 
     pub fn register(

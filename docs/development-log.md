@@ -47,4 +47,4 @@ Ruling: no production engine dependency yet. Source inspection found qualificati
 
 - Plan: `docs/superpowers/plans/2026-10-25-state-store.md`. The first SQLite tests cover idempotent add, destination conflicts, the 100-record cap, durable pause/resume, tombstone recovery, future schema rejection and v1 `.torrent` source bytes.
 - The first local RED attempt cannot compile the bundled SQLite amalgamation: this machine's Visual Studio C toolchain lacks `stdarg.h`. The default Rust suite still runs; the feature-gated SQLite suite must be exercised by hosted CI until the local C headers are repaired.
-- The store is not wired to CLI or engine. It does not yet provide a process lock, migrations from older schemas, persistent file IDs or a validated state-directory ACL. The feature gate prevents presenting it as a functional downloader.
+- The store is not wired to CLI or engine. A process-held file lock now prevents a second `StateStore` owner; its cross-platform CI result is pending. Migrations from older schemas, persistent file IDs and a validated state-directory ACL are still absent. The feature gate prevents presenting it as a functional downloader.

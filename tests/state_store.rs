@@ -109,6 +109,17 @@ fn declared_version_without_expected_table_fails_closed() {
 }
 
 #[test]
+fn one_process_owns_the_state_database_at_a_time() {
+    let workspace = tempfile::tempdir().unwrap();
+    let database = workspace.path().join("state.db");
+    let first = StateStore::open(&database).unwrap();
+    assert!(matches!(StateStore::open(&database), Err(StoreError::Busy)));
+    drop(first);
+    let second = StateStore::open(&database).unwrap();
+    assert!(second.recover().unwrap().is_empty());
+}
+
+#[test]
 fn metadata_and_registration_count_are_bounded() {
     let workspace = tempfile::tempdir().unwrap();
     let root = workspace.path().join("downloads");
