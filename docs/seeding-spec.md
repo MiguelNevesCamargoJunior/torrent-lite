@@ -1,6 +1,6 @@
 # Política de compartilhamento inicial
 
-O comando `serve` inicia com `--max-seeding 0`: ao concluir e validar as peças selecionadas, pausa a sessão de rede desse torrent. O operador pode escolher `--max-seeding N` entre 0 e 100. Até N torrents completos com intenção `running` permanecem ativos para enviar peças; os demais ficam pausados, em ordem de cadastro. Um torrent explicitamente pausado nunca compartilha.
+O comando `serve` inicia com `--max-seeding 0`: ao concluir e validar as peças selecionadas, pausa a sessão de rede desse torrent. O operador pode escolher `--max-seeding N` entre 0 e 100. Até N torrents completos com intenção `running` permanecem ativos para enviar peças; os demais ficam pausados, em ordem de cadastro. Um torrent explicitamente pausado nunca compartilha. A soma de `--max-active` e `--max-seeding` não pode exceder 150; o limite de peers por torrent é `min(50, floor(150 / soma))`, restringindo a capacidade configurada a no máximo 150 peers simultâneos.
 
 Vagas de compartilhamento são separadas de `--max-active`, que limita downloads incompletos e resoluções de magnet. Conclusão libera imediatamente a vaga de download; pausa, remoção ou falha liberam a vaga de compartilhamento. `--upload-limit-kib` continua limitando a taxa global. A configuração é do processo, como os limites de banda; reiniciar sem a flag volta ao padrão zero, mas a intenção `running` persistida não muda.
 

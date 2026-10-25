@@ -38,6 +38,7 @@ pub struct ServiceCore {
     mutation: AsyncMutex<()>,
     max_active_downloads: usize,
     max_seeding: usize,
+    peer_limit_per_torrent: usize,
 }
 
 pub const DEFAULT_MAX_ACTIVE_DOWNLOADS: usize = 3;
@@ -122,12 +123,20 @@ impl ServiceSettings {
 
     pub fn with_max_seeding(mut self, max_seeding: usize) -> anyhow::Result<Self> {
         anyhow::ensure!(max_seeding <= 100, "max seeding must be between 0 and 100");
+        anyhow::ensure!(
+            self.max_active_downloads + max_seeding <= 150,
+            "combined download and seeding slots must not exceed 150"
+        );
         self.max_seeding = max_seeding;
         Ok(self)
     }
 
     pub fn max_seeding(&self) -> usize {
         self.max_seeding
+    }
+
+    pub fn peer_limit_per_torrent(&self) -> usize {
+        (150 / (self.max_active_downloads + self.max_seeding)).min(50)
     }
 }
 
@@ -191,7 +200,7 @@ impl ServiceCore {
                     enable_tcp: false,
                     ..Default::default()
                 }),
-                peer_limit: Some(50),
+                peer_limit: Some(settings.peer_limit_per_torrent()),
                 concurrent_init_limit: Some(3),
                 ratelimits: LimitsConfig {
                     download_bps: settings.download_limit_bps,
@@ -214,6 +223,7 @@ impl ServiceCore {
             mutation: AsyncMutex::new(()),
             max_active_downloads: settings.max_active_downloads,
             max_seeding: settings.max_seeding,
+            peer_limit_per_torrent: settings.peer_limit_per_torrent(),
         };
         for item in service.list()? {
             anyhow::ensure!(
@@ -745,7 +755,7 @@ impl ServiceCore {
             Some(AddTorrentOptions {
                 paused: start_paused,
                 overwrite: true,
-                peer_limit: Some(50),
+                peer_limit: Some(self.peer_limit_per_torrent),
                 only_files,
                 storage_factory: Some(
                     DurableStorageFactory::new(torrent_root, self.state.clone(), item.id.clone())

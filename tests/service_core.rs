@@ -21,6 +21,26 @@ fn bandwidth_settings_reject_values_that_the_engine_cannot_apply() {
     assert!(ServiceSettings::new(1, None, Some(15)).is_err());
     assert!(ServiceSettings::new(1, Some(4_194_304), None).is_err());
     assert!(ServiceSettings::default().with_max_seeding(101).is_err());
+    assert!(
+        ServiceSettings::new(100, None, None)
+            .unwrap()
+            .with_max_seeding(51)
+            .is_err()
+    );
+    assert_eq!(ServiceSettings::default().peer_limit_per_torrent(), 50);
+    assert_eq!(
+        ServiceSettings::default()
+            .with_max_seeding(1)
+            .unwrap()
+            .peer_limit_per_torrent(),
+        37
+    );
+    assert_eq!(
+        ServiceSettings::new(100, None, None)
+            .unwrap()
+            .peer_limit_per_torrent(),
+        1
+    );
     assert_eq!(
         ServiceSettings::default()
             .with_max_seeding(1)
