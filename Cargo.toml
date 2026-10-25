@@ -14,6 +14,7 @@ state-store = ["dep:rusqlite", "dep:uuid"]
 durable-engine = ["engine-qualification", "state-store"]
 policy-proxy = ["dep:tokio", "dep:getrandom", "tokio/net", "tokio/io-util", "tokio/sync"]
 secure-engine-qualification = ["durable-engine", "policy-proxy"]
+service-core = ["secure-engine-qualification"]
 
 [dependencies]
 anyhow = { version = "1.0", optional = true }
@@ -60,6 +61,10 @@ required-features = ["policy-proxy"]
 [[test]]
 name = "engine_proxy"
 required-features = ["secure-engine-qualification"]
+
+[[test]]
+name = "service_core"
+required-features = ["service-core"]
 
 [profile.release]
 lto = "thin"

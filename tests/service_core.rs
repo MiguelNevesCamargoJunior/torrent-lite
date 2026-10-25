@@ -1,0 +1,105 @@
+use librqbit::{CreateTorrentOptions, ListenerOptions, Session, SessionOptions};
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    time::Duration,
+};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+};
+use torrent_lite::{
+    network_policy::DestinationPolicy, service_core::ServiceCore, state_store::DesiredState,
+};
+
+#[tokio::test]
+async fn paused_torrent_survives_reopen_and_resumes_with_verified_data() {
+    let workspace = tempfile::tempdir().unwrap();
+    let source = workspace.path().join("source");
+    let download = workspace.path().join("download");
+    std::fs::create_dir(&source).unwrap();
+    std::fs::create_dir(&download).unwrap();
+    let content: Vec<u8> = (0..32 * 1024).map(|i| (i % 251) as u8).collect();
+    let source_file = source.join("sample.bin");
+    std::fs::write(&source_file, &content).unwrap();
+    let seeder = Session::new_with_opts(
+        source,
+        SessionOptions {
+            dht: None,
+            disable_trackers: true,
+            disable_local_service_discovery: true,
+            persistence: None,
+            listen: Some(ListenerOptions {
+                listen_addr: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+                ipv4_only: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let (torrent, _) = seeder
+        .create_and_serve_torrent(
+            &source_file,
+            CreateTorrentOptions {
+                piece_length: Some(16 * 1024),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let tracker = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let tracker_url = format!("http://{}/announce", tracker.local_addr().unwrap());
+    let peer = seeder.listen_addr().unwrap();
+    let tracker_task = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = tracker.accept().await.unwrap();
+            let mut request = [0_u8; 8192];
+            let _ = socket.read(&mut request).await.unwrap();
+            let mut body = b"d8:intervali30e5:peers6:".to_vec();
+            body.extend(Ipv4Addr::LOCALHOST.octets());
+            body.extend(peer.port().to_be_bytes());
+            body.push(b'e');
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            socket.write_all(header.as_bytes()).await.unwrap();
+            socket.write_all(&body).await.unwrap();
+        }
+    });
+    let raw = torrent.as_bytes().unwrap();
+    let parsed = librqbit_core::torrent_metainfo::torrent_from_bytes(&raw).unwrap();
+    let mut bytes = b"d8:announce".to_vec();
+    bytes.extend(format!("{}:{tracker_url}", tracker_url.len()).as_bytes());
+    bytes.extend(b"4:info");
+    bytes.extend(parsed.info.raw_bytes.as_ref());
+    bytes.push(b'e');
+    let database = workspace.path().join("state.db");
+
+    let service = ServiceCore::open(&database, &download, DestinationPolicy::AllowLan)
+        .await
+        .unwrap();
+    let item = service.add_torrent(&bytes, true).await.unwrap();
+    assert_eq!(item.desired, DesiredState::Paused);
+    assert_eq!(service.list().unwrap().len(), 1);
+    service.stop().await;
+
+    let service = ServiceCore::open(&database, &download, DestinationPolicy::AllowLan)
+        .await
+        .unwrap();
+    assert_eq!(service.list().unwrap()[0].desired, DesiredState::Paused);
+    service.resume(&item.id).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(25), service.wait_completed(&item.id))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        std::fs::read(download.join(&item.id).join("sample.bin")).unwrap(),
+        content
+    );
+    assert!(service.proxy_connections() > 0);
+    service.stop().await;
+    tracker_task.abort();
+    seeder.stop().await;
+}

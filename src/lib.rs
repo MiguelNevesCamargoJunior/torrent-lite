@@ -9,6 +9,8 @@ pub mod path_policy;
 #[cfg(feature = "policy-proxy")]
 pub mod policy_proxy;
 pub mod safe_storage;
+#[cfg(feature = "service-core")]
+pub mod service_core;
 #[cfg(feature = "state-store")]
 pub mod state_store;
 pub mod torrent_file;
