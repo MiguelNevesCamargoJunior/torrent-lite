@@ -1,3 +1,4 @@
+use torrent_lite::safe_storage::{FileIdentity, SafeRoot};
 use torrent_lite::state_store::{AddInput, DesiredState, SourceKind, StateStore, StoreError};
 
 fn magnet(n: u64) -> String {
@@ -187,4 +188,111 @@ fn v1_torrent_bytes_are_registered_and_restored() {
     assert_eq!(record.source_kind, SourceKind::Torrent);
     let reopened = StateStore::open(&database).unwrap();
     assert_eq!(reopened.load_source(&record.id).unwrap(), bytes);
+}
+
+#[test]
+fn file_identity_survives_reopen_and_refuses_conflicting_replacement() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root_path = workspace.path().join("downloads");
+    std::fs::create_dir(&root_path).unwrap();
+    let root = SafeRoot::open(&root_path).unwrap();
+    let file = root.create_new(&["file.bin"]).unwrap();
+    let identity = FileIdentity::from_file(&file).unwrap();
+    let other = root.create_new(&["other.bin"]).unwrap();
+    let other_identity = FileIdentity::from_file(&other).unwrap();
+    let database = workspace.path().join("state.db");
+    let id = {
+        let mut store = StateStore::open(&database).unwrap();
+        let record = store
+            .register(AddInput::Magnet(&magnet(500)), &root_path, true)
+            .unwrap();
+        store
+            .record_file_identity(&record.id, 0, &["file.bin"], 4, identity)
+            .unwrap();
+        store
+            .record_file_identity(&record.id, 0, &["file.bin"], 4, identity)
+            .unwrap();
+        assert!(matches!(
+            store.record_file_identity(&record.id, 0, &["file.bin"], 4, other_identity),
+            Err(StoreError::Conflict)
+        ));
+        record.id
+    };
+    let store = StateStore::open(&database).unwrap();
+    let identities = store.load_file_identities(&id).unwrap();
+    assert_eq!(identities.len(), 1);
+    assert_eq!(identities[0].file_index, 0);
+    assert_eq!(identities[0].path, vec!["file.bin"]);
+    assert_eq!(identities[0].length, 4);
+    assert_eq!(identities[0].identity, identity);
+}
+
+fn create_v1_database(database: &std::path::Path) {
+    let connection = rusqlite::Connection::open(database).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE torrents (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    info_hash TEXT NOT NULL UNIQUE,
+                    source_kind TEXT NOT NULL CHECK(source_kind IN ('magnet','torrent')),
+                    source BLOB NOT NULL,
+                    destination_root TEXT NOT NULL,
+                    desired TEXT NOT NULL CHECK(desired IN ('running','paused')),
+                    tombstone INTEGER NOT NULL DEFAULT 0 CHECK(tombstone IN (0,1))
+                );
+             PRAGMA application_id=1953261940;
+             PRAGMA user_version=1;",
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO torrents(id,info_hash,source_kind,source,destination_root,desired) VALUES (?1,?2,'magnet',?3,?4,'paused')",
+            rusqlite::params!["old-id", format!("{:040x}", 900), magnet(900).as_bytes(), database.parent().unwrap().to_str().unwrap()],
+        )
+        .unwrap();
+}
+
+#[test]
+fn v1_migration_backs_up_and_preserves_intent() {
+    let workspace = tempfile::tempdir().unwrap();
+    let database = workspace.path().join("state.db");
+    create_v1_database(&database);
+    let store = StateStore::open(&database).unwrap();
+    let records = store.recover().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].id, "old-id");
+    assert_eq!(records[0].desired, DesiredState::Paused);
+    drop(store);
+    let backup = workspace.path().join("state.db.v1.bak");
+    assert!(backup.exists());
+    let backed_up = rusqlite::Connection::open(&backup).unwrap();
+    assert_eq!(
+        backed_up
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    let reopened = StateStore::open(&database).unwrap();
+    assert_eq!(reopened.recover().unwrap()[0].id, "old-id");
+}
+
+#[test]
+fn previous_migration_backup_prevents_overwriting_it() {
+    let workspace = tempfile::tempdir().unwrap();
+    let database = workspace.path().join("state.db");
+    create_v1_database(&database);
+    let backup = workspace.path().join("state.db.v1.bak");
+    std::fs::write(&backup, b"keep this backup").unwrap();
+    assert!(matches!(
+        StateStore::open(&database),
+        Err(StoreError::MigrationBackupExists)
+    ));
+    assert_eq!(std::fs::read(&backup).unwrap(), b"keep this backup");
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    assert_eq!(
+        connection
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
 }

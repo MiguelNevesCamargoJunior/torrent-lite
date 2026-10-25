@@ -18,4 +18,10 @@ Data: 2026-10-25. Escopo: intenção e registro de torrents; integração com o 
 3. Implementar esquema v1 e operações transacionais por uma conexão dona do serviço. SQL parametrizado e `PRAGMA foreign_keys=ON`; configurar durabilidade, lock exclusivo de processo e tempo limite de banco explicitamente.
 4. Rodar fmt, clippy e testes nos três SOs; documentar o que ainda falta para recuperação de processo completo, lock, backup de migração e integração de identidades de arquivo.
 
+## Evolução v2
+
+5. Registrar identidades de arquivos validadas como blobs fixos de 24 bytes (dispositivo de 64 bits + ID de arquivo de 128 bits), vinculadas ao ID do torrent e índice do arquivo. Uma gravação repetida idêntica é idempotente; identidade divergente é conflito.
+6. Migrar v1 para v2 apenas após `VACUUM INTO` produzir um backup consistente. Se já houver backup de migração, falhar fechado e preservar o banco. v2 contém a tabela de identidades e exige o esquema esperado ao abrir.
+7. Testar migração de fixture v1, backup, preservação de pausa e tombstone, identidade após reabrir, conflito, schema v2 incompleto e falha de backup.
+
 Este milestone não habilita downloads pela CLI até que armazenamento, destinos de rede e a reconciliação com o motor estejam qualificados.

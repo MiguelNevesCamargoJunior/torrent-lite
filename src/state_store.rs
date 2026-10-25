@@ -1,6 +1,9 @@
 //! Transactional intent store. The service must take its process lock before opening it.
 
-use crate::{InputError, magnet::Magnet, torrent_file::inspect_torrent};
+use crate::{
+    InputError, magnet::Magnet, path_policy::validate_components, safe_storage::FileIdentity,
+    torrent_file::inspect_torrent,
+};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use std::{
     fs::{File, OpenOptions as FileOpenOptions, TryLockError},
@@ -8,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const APPLICATION_ID: i64 = 0x746c6974;
 const MAX_TORRENTS: i64 = 100;
 const MAX_SOURCE_BYTES: i64 = 8 * 1024 * 1024;
@@ -21,6 +24,29 @@ const CREATE_TORRENTS_SQL: &str = "CREATE TABLE torrents (
                     desired TEXT NOT NULL CHECK(desired IN ('running','paused')),
                     tombstone INTEGER NOT NULL DEFAULT 0 CHECK(tombstone IN (0,1))
                 )";
+const CREATE_FILE_IDENTITIES_SQL: &str = "CREATE TABLE file_identities (
+                    torrent_id TEXT NOT NULL REFERENCES torrents(id),
+                    file_index INTEGER NOT NULL CHECK(file_index BETWEEN 0 AND 9999),
+                    path_json TEXT NOT NULL,
+                    length INTEGER NOT NULL CHECK(length >= 0),
+                    identity BLOB NOT NULL CHECK(length(identity) = 24),
+                    PRIMARY KEY(torrent_id, file_index)
+                )";
+
+fn matches_schema(
+    connection: &Connection,
+    table: &str,
+    expected: &str,
+) -> Result<bool, StoreError> {
+    let actual: Option<String> = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",
+            [table],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(actual.as_deref() == Some(expected))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesiredState {
@@ -82,6 +108,14 @@ pub struct StoredTorrent {
     pub desired: DesiredState,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredFileIdentity {
+    pub file_index: u32,
+    pub path: Vec<String>,
+    pub length: u64,
+    pub identity: FileIdentity,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("invalid torrent input: {0}")]
@@ -102,11 +136,21 @@ pub enum StoreError {
     NotFound,
     #[error("state database is already owned by another process")]
     Busy,
+    #[error("migration backup already exists; inspect state before retrying")]
+    MigrationBackupExists,
 }
 
 pub struct StateStore {
     connection: Connection,
-    _lock_file: File,
+    _lock_file: ProcessLock,
+}
+
+struct ProcessLock(File);
+
+impl Drop for ProcessLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
 }
 
 impl StateStore {
@@ -142,24 +186,42 @@ impl StateStore {
             let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
             let app_id: i64 =
                 connection.query_row("PRAGMA application_id", [], |row| row.get(0))?;
-            if version != SCHEMA_VERSION || app_id != APPLICATION_ID {
+            if !(1..=SCHEMA_VERSION).contains(&version)
+                || app_id != APPLICATION_ID
+                || !matches_schema(&connection, "torrents", CREATE_TORRENTS_SQL)?
+            {
                 return Err(StoreError::UnsupportedSchema);
             }
-            let actual_schema: Option<String> = connection
-                .query_row(
-                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='torrents'",
-                    [],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if actual_schema.as_deref() != Some(CREATE_TORRENTS_SQL) {
+            if version == 1 {
+                let mut backup_name = path
+                    .file_name()
+                    .ok_or(StoreError::UnsupportedSchema)?
+                    .to_os_string();
+                backup_name.push(".v1.bak");
+                let backup_path = path.with_file_name(backup_name);
+                match backup_path.symlink_metadata() {
+                    Ok(_) => return Err(StoreError::MigrationBackupExists),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(StoreError::Io(error)),
+                }
+                let backup_path = backup_path.to_str().ok_or(StoreError::UnsupportedSchema)?;
+                connection.execute_batch("PRAGMA synchronous=FULL;")?;
+                connection.execute("VACUUM INTO ?1", [backup_path])?;
+                let transaction =
+                    connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                transaction.execute_batch(&format!(
+                    "{CREATE_FILE_IDENTITIES_SQL}; PRAGMA user_version = {SCHEMA_VERSION};"
+                ))?;
+                transaction.commit()?;
+            }
+            if !matches_schema(&connection, "file_identities", CREATE_FILE_IDENTITIES_SQL)? {
                 return Err(StoreError::UnsupportedSchema);
             }
         } else {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute_batch(&format!(
-                "{CREATE_TORRENTS_SQL}; PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {SCHEMA_VERSION};"
+                "{CREATE_TORRENTS_SQL}; {CREATE_FILE_IDENTITIES_SQL}; PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {SCHEMA_VERSION};"
             ))?;
             transaction.commit()?;
         }
@@ -168,7 +230,7 @@ impl StateStore {
         )?;
         Ok(Self {
             connection,
-            _lock_file: lock_file,
+            _lock_file: ProcessLock(lock_file),
         })
     }
 
@@ -339,5 +401,108 @@ impl StateStore {
             [id],
             |row| row.get(0),
         )?)
+    }
+
+    pub fn record_file_identity(
+        &mut self,
+        torrent_id: &str,
+        file_index: u32,
+        components: &[&str],
+        length: u64,
+        identity: FileIdentity,
+    ) -> Result<(), StoreError> {
+        validate_components(components)?;
+        if file_index >= 10_000 || length > i64::MAX as u64 {
+            return Err(StoreError::Input(InputError::TooLarge));
+        }
+        let path_json = serde_json::to_string(components).map_err(|_| StoreError::Corrupt)?;
+        if path_json.len() > 32 * 1024 {
+            return Err(StoreError::Input(InputError::TooLarge));
+        }
+        let encoded = identity.to_record_bytes();
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let active: Option<i64> = transaction
+            .query_row(
+                "SELECT tombstone FROM torrents WHERE id=?1",
+                [torrent_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if active != Some(0) {
+            return Err(StoreError::NotFound);
+        }
+        let existing: Option<(String, i64, Vec<u8>)> = transaction
+            .query_row(
+                "SELECT path_json,length,identity FROM file_identities WHERE torrent_id=?1 AND file_index=?2",
+                params![torrent_id, file_index],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        if let Some((old_path, old_length, old_identity)) = existing {
+            if old_path == path_json
+                && old_length == length as i64
+                && old_identity.as_slice() == encoded.as_slice()
+            {
+                return Ok(());
+            }
+            return Err(StoreError::Conflict);
+        }
+        transaction.execute(
+            "INSERT INTO file_identities(torrent_id,file_index,path_json,length,identity) VALUES (?1,?2,?3,?4,?5)",
+            params![torrent_id, file_index, path_json, length as i64, encoded.as_slice()],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn load_file_identities(
+        &self,
+        torrent_id: &str,
+    ) -> Result<Vec<StoredFileIdentity>, StoreError> {
+        let active: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT tombstone FROM torrents WHERE id=?1",
+                [torrent_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if active != Some(0) {
+            return Err(StoreError::NotFound);
+        }
+        let mut statement = self.connection.prepare(
+            "SELECT file_index,path_json,length,identity FROM file_identities WHERE torrent_id=?1 ORDER BY file_index"
+        )?;
+        let rows = statement.query_map([torrent_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+            ))
+        })?;
+        let mut output = Vec::new();
+        for row in rows {
+            let (file_index, path_json, length, encoded) = row?;
+            let file_index = u32::try_from(file_index).map_err(|_| StoreError::Corrupt)?;
+            let length = u64::try_from(length).map_err(|_| StoreError::Corrupt)?;
+            let path: Vec<String> =
+                serde_json::from_str(&path_json).map_err(|_| StoreError::Corrupt)?;
+            validate_components(&path.iter().map(String::as_str).collect::<Vec<_>>())
+                .map_err(|_| StoreError::Corrupt)?;
+            let identity = FileIdentity::from_record_bytes(&encoded).ok_or(StoreError::Corrupt)?;
+            output.push(StoredFileIdentity {
+                file_index,
+                path,
+                length,
+                identity,
+            });
+            if output.len() > 10_000 {
+                return Err(StoreError::Corrupt);
+            }
+        }
+        Ok(output)
     }
 }

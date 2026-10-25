@@ -21,6 +21,25 @@ pub struct FileIdentity {
 }
 
 impl FileIdentity {
+    #[cfg(feature = "state-store")]
+    pub(crate) fn to_record_bytes(self) -> [u8; 24] {
+        let mut bytes = [0_u8; 24];
+        bytes[..8].copy_from_slice(&self.device.to_le_bytes());
+        bytes[8..].copy_from_slice(&self.file_id);
+        bytes
+    }
+
+    #[cfg(feature = "state-store")]
+    pub(crate) fn from_record_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != 24 || bytes[8..].iter().all(|value| *value == 0) {
+            return None;
+        }
+        let device = u64::from_le_bytes(bytes[..8].try_into().ok()?);
+        let mut file_id = [0_u8; 16];
+        file_id.copy_from_slice(&bytes[8..]);
+        Some(Self { device, file_id })
+    }
+
     pub fn from_file(file: &File) -> io::Result<Self> {
         #[cfg(unix)]
         {
