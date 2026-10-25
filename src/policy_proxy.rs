@@ -5,7 +5,10 @@ use crate::network_policy::DestinationPolicy;
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 use tokio::{
@@ -23,6 +26,7 @@ const MAX_CONNECTIONS: usize = 150;
 pub struct PolicyProxy {
     local_addr: SocketAddr,
     password: String,
+    successful_connections: Arc<AtomicU64>,
     task: JoinHandle<()>,
 }
 
@@ -37,16 +41,23 @@ impl PolicyProxy {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         let expected = password.clone();
-        let task = tokio::spawn(async move { serve(listener, expected, policy).await });
+        let successful_connections = Arc::new(AtomicU64::new(0));
+        let count = successful_connections.clone();
+        let task = tokio::spawn(async move { serve(listener, expected, policy, count).await });
         Ok(Self {
             local_addr,
             password,
+            successful_connections,
             task,
         })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    pub fn successful_connections(&self) -> u64 {
+        self.successful_connections.load(Ordering::Relaxed)
     }
 
     /// Keep this URL in process memory only; never put it in logs, CLI arguments or state.
@@ -61,7 +72,12 @@ impl Drop for PolicyProxy {
     }
 }
 
-async fn serve(listener: TcpListener, password: String, policy: DestinationPolicy) {
+async fn serve(
+    listener: TcpListener,
+    password: String,
+    policy: DestinationPolicy,
+    count: Arc<AtomicU64>,
+) {
     let permits = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
     let mut tasks = JoinSet::new();
     loop {
@@ -70,9 +86,10 @@ async fn serve(listener: TcpListener, password: String, policy: DestinationPolic
                 let Ok((stream, _)) = accepted else { break };
                 let Ok(permit) = permits.clone().try_acquire_owned() else { continue };
                 let password = password.clone();
+                let count = count.clone();
                 tasks.spawn(async move {
                     let _permit = permit;
-                    let _ = handle(stream, &password, policy).await;
+                    let _ = handle(stream, &password, policy, &count).await;
                 });
             }
             _ = tasks.join_next(), if !tasks.is_empty() => {}
@@ -84,6 +101,7 @@ async fn handle(
     mut client: TcpStream,
     password: &str,
     policy: DestinationPolicy,
+    count: &AtomicU64,
 ) -> io::Result<()> {
     timeout(HANDSHAKE_TIMEOUT, authenticate(&mut client, password)).await??;
     let target = match timeout(HANDSHAKE_TIMEOUT, read_destination(&mut client)).await? {
@@ -102,6 +120,7 @@ async fn handle(
     };
     for address in addresses {
         if let Ok(Ok(mut remote)) = timeout(CONNECT_TIMEOUT, TcpStream::connect(address)).await {
+            count.fetch_add(1, Ordering::Relaxed);
             send_reply(&mut client, 0).await?;
             let _ = tokio::io::copy_bidirectional(&mut client, &mut remote).await?;
             return Ok(());

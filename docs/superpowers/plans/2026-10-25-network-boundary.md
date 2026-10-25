@@ -8,6 +8,8 @@ The current engine's SOCKS option covers outbound TCP peers and its reqwest HTTP
 
 First tests: public IPv4/IPv6 accepted; loopback, private, link-local, documentation, multicast, IPv4-mapped IPv6, 6to4 and unspecified addresses denied. Tracker URLs accept only HTTP(S) without credentials or fragments. This pure policy module precedes the proxy so the dangerous address classes are explicit and independently testable. It does not on its own enforce a network boundary.
 
+The experimental proxy now implements SOCKS5 CONNECT with a 256-bit random password, loopback-only binding, bounded handshakes and 150 concurrent sessions. It resolves domain requests itself, filters each concrete IP, then connects to that IP so DNS cannot change the selected socket destination. Tests cover authentication, IP and DNS denial, and an explicit LAN-mode relay. A combined local-peer qualification test is being added for the engine and persisted storage; public trackers remain disabled in that test. Do not turn on unrestricted engine discovery based on the proxy test alone.
+
 Source of address classes: IANA IPv4 and IPv6 Special-Purpose Address Registries, consulted 2026-10-25. Update the policy when those registries change.
 
 - https://www.iana.org/assignments/iana-ipv4-special-registry/

@@ -134,5 +134,6 @@ async fn explicit_lan_mode_relays_bytes_to_the_pinned_ip() {
         .unwrap()
         .unwrap();
     assert_eq!(&response, b"pong");
+    assert_eq!(proxy.successful_connections(), 1);
     peer.await.unwrap();
 }
