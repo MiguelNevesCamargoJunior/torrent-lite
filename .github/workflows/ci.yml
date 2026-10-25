@@ -1,0 +1,27 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: rustup toolchain install 1.91.1 --profile minimal --component rustfmt --component clippy
+      - name: Formatting
+        run: cargo +1.91.1 fmt --all -- --check
+      - name: Lints
+        run: cargo +1.91.1 clippy --locked --all-targets -- -D warnings
+      - name: Tests
+        run: cargo +1.91.1 test --locked
+
