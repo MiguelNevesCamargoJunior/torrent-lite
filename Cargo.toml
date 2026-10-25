@@ -8,19 +8,28 @@ license = "Apache-2.0"
 repository = "https://github.com/MiguelNevesCamargoJunior/torrent-lite"
 publish = false
 
+[features]
+engine-qualification = ["dep:librqbit", "dep:tokio"]
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 data-encoding = "2.9"
 librqbit-core = "=9.0.1"
 librqbit-bencode = "=9.0.1"
+librqbit = { version = "=9.0.1", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"], optional = true }
 unicode-normalization = "0.1"
 url = "2.5"
 
 [dev-dependencies]
 tempfile = "3"
+
+[[test]]
+name = "engine_local"
+required-features = ["engine-qualification"]
 
 [profile.release]
 lto = "thin"

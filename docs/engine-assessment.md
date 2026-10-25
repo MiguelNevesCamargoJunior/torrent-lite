@@ -19,6 +19,8 @@ This is a compatibility assessment against this project's stricter design, **not
 
 ## Next experiments
 
+The first transfer experiment lives in `tests/engine_local.rs`, gated by `engine-qualification`. It creates a synthetic file and runs two sessions on loopback with public discovery disabled. Local Windows compilation is currently blocked before the test runs because this machine's Visual Studio C++ installation lacks `vcruntime.h` (AWS-LC native dependency). The test is scheduled on the hosted Windows CI environment; its result must be checked before changing this assessment to "passed".
+
 1. Create a test-only adapter with discovery disabled and explicit loopback peers. Transfer a synthetic payload and assert bytes and piece hashes.
 2. Stop/restart with existing data; corrupt a cross-file piece, verify and assert only invalid data is fetched again.
 3. Test StorageFactory with Windows junction replacement and POSIX symlink races before allowing disk writes to untrusted paths.

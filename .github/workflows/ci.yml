@@ -24,4 +24,7 @@ jobs:
         run: cargo +1.91.1 clippy --locked --all-targets -- -D warnings
       - name: Tests
         run: cargo +1.91.1 test --locked
+      - name: Local peer engine qualification
+        if: matrix.os == 'windows-latest'
+        run: cargo +1.91.1 test --locked --features engine-qualification --test engine_local
 
