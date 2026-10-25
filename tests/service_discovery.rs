@@ -70,10 +70,10 @@ async fn await_new_endpoint(
     old_token: Option<&str>,
 ) -> torrent_lite::service_discovery::EndpointInfo {
     for _ in 0..200 {
-        if let Ok(endpoint) = EndpointLease::read(database) {
-            if old_token != Some(endpoint.token.as_str()) {
-                return endpoint;
-            }
+        if let Ok(endpoint) = EndpointLease::read(database)
+            && old_token != Some(endpoint.token.as_str())
+        {
+            return endpoint;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
