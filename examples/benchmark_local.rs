@@ -55,7 +55,7 @@ fn isolated_options() -> SessionOptions {
 fn create_payload(path: &Path, size: u64) -> Result<()> {
     let mut file = File::create(path)?;
     let mut state = 0x4d59_5df4_d0f3_3173_u64;
-    let mut block = [0_u8; 1024 * 1024];
+    let mut block = vec![0_u8; 1024 * 1024];
     let mut remaining = size;
     while remaining > 0 {
         let count = remaining.min(block.len() as u64) as usize;
@@ -78,8 +78,8 @@ fn same_contents(left: &Path, right: &Path) -> Result<bool> {
     if remaining != right.metadata()?.len() {
         return Ok(false);
     }
-    let mut a = [0_u8; 1024 * 1024];
-    let mut b = [0_u8; 1024 * 1024];
+    let mut a = vec![0_u8; 1024 * 1024];
+    let mut b = vec![0_u8; 1024 * 1024];
     while remaining > 0 {
         let count = remaining.min(a.len() as u64) as usize;
         left.read_exact(&mut a[..count])?;
