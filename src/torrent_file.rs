@@ -11,6 +11,8 @@ struct RootVersion {
 struct InfoVersion {
     #[serde(rename = "meta version")]
     meta_version: Option<u8>,
+    #[serde(rename = "piece length")]
+    piece_length: Option<u64>,
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -37,6 +39,9 @@ pub fn inspect_torrent(bytes: &[u8]) -> Result<TorrentSummary, InputError> {
         librqbit_bencode::from_bytes(bytes).map_err(|_| InputError::InvalidTorrent)?;
     if marker.info.meta_version.is_some() {
         return Err(InputError::UnsupportedFormat);
+    }
+    if !marker.info.piece_length.is_some_and(|length| length > 0) {
+        return Err(InputError::InvalidTorrent);
     }
     let meta = torrent_from_bytes(bytes).map_err(|_| InputError::InvalidTorrent)?;
     let raw_info = &meta.info.data;

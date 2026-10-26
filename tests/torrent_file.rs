@@ -61,6 +61,21 @@ fn rejects_invalid_or_oversize_metadata() {
 }
 
 #[test]
+fn rejects_zero_piece_length_before_upstream_length_calculation() {
+    let mut bytes = single(b"file.txt", b"");
+    let marker = b"12:piece lengthi4e";
+    let start = bytes
+        .windows(marker.len())
+        .position(|value| value == marker)
+        .unwrap();
+    bytes.splice(
+        start..start + marker.len(),
+        b"12:piece lengthi0e".iter().copied(),
+    );
+    assert_eq!(inspect_torrent(&bytes), Err(InputError::InvalidTorrent));
+}
+
+#[test]
 fn rejects_v2_and_hybrid_metadata_explicitly() {
     let mut hybrid = single(b"file.txt", b"");
     hybrid.splice(

@@ -68,3 +68,7 @@ Ruling: no production engine dependency yet. Source inspection found qualificati
 - An explicit LAN policy overload retains a loopback HTTP tracker for controlled tests; the public default drops it. A new local-tracker integration test provides no initial peers and requires both tracker and peer connections to register through the proxy before the synthetic download can pass.
 - Service-core planning exposed an upstream edge case: librqbit 9.0.1 `Session::delete` expects resolved metadata and can panic when a magnet is removed before resolution. The service must avoid or patch that path before remove is exposed. A capability-scoped `SafeRoot::subdir` was tested RED/GREEN locally to isolate each torrent's files without reopening an ambient path.
 - `SafeRoot` now uses `cap-fs-ext::DirExt::open_dir_nofollow` when entering each child directory. This closes the gap between a metadata check and a directory open if a symlink or Windows junction replaces a directory. Both POSIX symlink and Windows junction tests assert the new `subdir` operation rejects the link.
+
+## Parser fuzzing
+
+- The first hosted libFuzzer run found a `.torrent` with `piece length = 0` that panicked in librqbit-core 9.0.1's length calculation. A regression test reproduced the divide-by-zero locally before the fix. `inspect_torrent` now rejects missing or zero piece length before calling the upstream parser; the torrent parser tests and deterministic mutation tests pass locally. The fuzz target must be rerun after this change.
