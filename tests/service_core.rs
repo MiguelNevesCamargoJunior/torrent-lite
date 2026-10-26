@@ -15,6 +15,68 @@ use torrent_lite::{
     state_store::{AddInput, DesiredState, StateStore},
 };
 
+#[cfg(windows)]
+#[tokio::test]
+async fn exclusively_locked_file_fails_activation_then_recovers_without_replacement() {
+    use std::{io::Write, os::windows::fs::OpenOptionsExt};
+    use torrent_lite::safe_storage::{FileIdentity, SafeRoot};
+
+    let workspace = tempfile::tempdir().unwrap();
+    let download = workspace.path().join("download");
+    std::fs::create_dir(&download).unwrap();
+    let database = workspace.path().join("state.db");
+    let mut metainfo = b"d4:infod6:lengthi4e4:name8:file.txt12:piece lengthi4e6:pieces20:".to_vec();
+    metainfo.extend([0_u8; 20]);
+    metainfo.extend(b"ee");
+    let mut store = StateStore::open(&database).unwrap();
+    let item = store
+        .register(AddInput::Torrent(&metainfo), &download, true)
+        .unwrap();
+    let root = SafeRoot::open(&download).unwrap().subdir(&item.id).unwrap();
+    let mut file = root.create_new(&["file.txt"]).unwrap();
+    file.write_all(b"data").unwrap();
+    let identity = FileIdentity::from_file(&file).unwrap();
+    store
+        .record_file_identity(&item.id, 0, &["file.txt"], 4, identity)
+        .unwrap();
+    drop(file);
+    drop(root);
+    drop(store);
+
+    let path = download.join(&item.id).join("file.txt");
+    let exclusive = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(&path)
+        .unwrap();
+    let service = ServiceCore::open(&database, &download, DestinationPolicy::PublicOnly)
+        .await
+        .unwrap();
+    service.resume(&item.id).await.unwrap();
+    assert_eq!(service.list().unwrap()[0].desired, DesiredState::Running);
+    assert_eq!(
+        service.activation_failure(&item.id).await.unwrap().0,
+        "activation_failed"
+    );
+    assert!(service.metrics(&item.id).await.is_none());
+    drop(exclusive);
+
+    service.pause(&item.id).await.unwrap();
+    assert!(service.activation_failure(&item.id).await.is_none());
+    service.resume(&item.id).await.unwrap();
+    assert!(service.activation_failure(&item.id).await.is_none());
+    assert!(service.metrics(&item.id).await.is_some());
+    service.stop().await;
+    drop(service);
+    let reopened = StateStore::open(&database).unwrap();
+    assert_eq!(
+        reopened.load_file_identities(&item.id).unwrap()[0].identity,
+        identity
+    );
+    assert_eq!(std::fs::read(path).unwrap(), b"data");
+}
+
 #[test]
 fn bandwidth_settings_reject_values_that_the_engine_cannot_apply() {
     assert!(ServiceSettings::new(0, None, None).is_err());
