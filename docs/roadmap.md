@@ -26,13 +26,13 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 
 - [x] Store validated resolved metainfo for magnets so restart and explicit verification do not depend on a tracker being online, subject to CI qualification.
 - [x] Foreground start, authenticated graceful stop and status; queueing, concurrency and bandwidth limits, selected files, seeding policy.
-- [ ] Qualify background resolution of uncached magnet metadata without holding the service mutation lock during the network wait, including cancellation, retries and the active-slot bound on all supported systems.
+- [x] Qualify background resolution of uncached magnet metadata without holding the service mutation lock during the network wait, including cancellation, retries and the active-slot bound on all supported systems. The service and local API tests passed on Windows, Linux and macOS in [CI run 40257438435](https://github.com/MiguelNevesCamargoJunior/torrent-lite/actions/runs/40257438435).
 - [ ] Finish browser UI qualification: automated keyboard/browser tests, usability review and CSRF regression coverage across supported browsers.
 - [ ] Show measured speed, peers, error states and ETA without inventing values; provide machine-readable API errors.
 - [ ] Qualify DHT, UDP trackers, private tracker failover and peer discovery under the outbound network policy, or document narrower compatibility.
 - [ ] Test low disk space, locked files, service crash during each mutation, migration interruption and concurrent clients on native Windows.
 - [ ] Fuzz untrusted inputs and obtain an independent security review.
-- [ ] Publish reproducible benchmark procedure and measurements of memory, CPU and throughput on Windows, Linux and macOS.
+- [x] Publish reproducible benchmark procedures and measurements of sampled working set, CPU and throughput on Windows, Linux and macOS. See the [direct engine results](benchmarks/2026-10-26-73c6ab9/README.md) and [full-service results](benchmarks/service-2026-10-26-cfb0558/README.md).
 - [ ] Publish signed or clearly marked unsigned artifacts with checksums, SBOM, dependency attribution and provenance.
 
 Unsupported features return errors or stay disabled. There are no release binaries yet.
