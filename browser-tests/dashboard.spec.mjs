@@ -68,6 +68,17 @@ test('shows measured ETA and keeps unavailable ETA explicit', async ({ page }) =
   }
 });
 
+test('shows a measured low download rate without rounding it to zero', async ({ page }) => {
+  const site = await fixture([row({ download_bytes_per_sec: 64 })]);
+  try {
+    await page.goto(site.url);
+    await expect(page.locator('.speed')).toHaveText('64 B/s');
+  } finally {
+    await page.close();
+    await site.close();
+  }
+});
+
 test('keyboard submits magnet with CSRF token and Escape closes file dialog', async ({ page }) => {
   const site = await fixture([row()]);
   try {
