@@ -85,8 +85,12 @@ try {
                     $maxWorkingSet = $sampleWorkingSet
                 }
             }
+            if ($cpuSeconds -le 0) {
+                $lastSample = $samples[$samples.Count - 1]
+                $cpuSeconds = [double]$lastSample["cpu_seconds"]
+            }
             if ($cpuSeconds -le 0 -or $maxWorkingSet -le 0) {
-                throw "Service benchmark run $run did not produce valid CPU and working-set measurements."
+                throw "Service benchmark run $run produced invalid metrics: cpu_seconds=$cpuSeconds, max_sampled_working_set_bytes=$maxWorkingSet."
             }
 
             $report = $stdout | ConvertFrom-Json -AsHashtable
