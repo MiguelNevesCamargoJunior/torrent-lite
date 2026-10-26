@@ -42,6 +42,8 @@ The library validates portable path components, rejects file/directory collision
 
 Untrusted `.torrent` and magnet parsing now has a [deterministic mutation regression test and a libFuzzer target](docs/fuzzing.md). A scheduled Linux workflow runs a short fuzz campaign; independent security review and broader protocol fuzzing remain open.
 
+Dependency advisories, licenses and registry sources are checked by the [dependency policy workflow](.github/workflows/dependencies.yml). A narrowly patched upstream uTP crate replaces an affected `ringbuf` line; see [dependency patch provenance](docs/dependency-patches.md).
+
 ## Local performance benchmark
 
 The [benchmark procedure](docs/benchmark-spec.md) builds a release example that downloads a deterministic payload from a separate loopback seeder process. It reports verified transfer time and throughput. A PowerShell script runs it three times and samples the downloader process's CPU and working set. The [manual benchmark workflow](https://github.com/MiguelNevesCamargoJunior/torrent-lite/actions/workflows/benchmark.yml) runs on Windows, Linux and macOS and uploads JSON results. Results are scoped to this synthetic setup.
