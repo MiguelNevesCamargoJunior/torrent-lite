@@ -8,7 +8,7 @@ use benchmark_support::{Ready, SeederChild, same_contents, seed};
 use librqbit_core::torrent_metainfo::torrent_from_bytes;
 use std::{
     net::{Ipv4Addr, SocketAddr},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
         Arc,
@@ -31,6 +31,29 @@ use torrent_lite::{
 
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(180);
 const SERVICE_START_TIMEOUT: Duration = Duration::from_secs(60);
+
+struct TempWorkspace(PathBuf);
+
+impl TempWorkspace {
+    fn create() -> Result<Self> {
+        let path = std::env::temp_dir().join(format!(
+            "torrent-lite-service-benchmark-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&path)?;
+        Ok(Self(path))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempWorkspace {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -61,7 +84,7 @@ async fn run() -> Result<()> {
 
 async fn measure(size_mib: u64) -> Result<()> {
     ensure!((8..=256).contains(&size_mib), "size must be 8..=256 MiB");
-    let workspace = tempfile::tempdir()?;
+    let workspace = TempWorkspace::create()?;
     let source = workspace.path().join("source");
     let destination = workspace.path().join("destination");
     std::fs::create_dir(&source)?;
