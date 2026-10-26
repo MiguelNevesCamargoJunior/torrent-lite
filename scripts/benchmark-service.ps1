@@ -124,6 +124,7 @@ try {
 
     $throughputs = @($results | ForEach-Object { [double]$_.service_report.transfer_mib_per_sec } | Sort-Object)
     $workingSets = @($results | ForEach-Object { [double]$_.max_sampled_working_set_bytes } | Sort-Object)
+    $cpuTimes = @($results | ForEach-Object { [double]$_.cpu_seconds } | Sort-Object)
     $medianThroughput = if ($Runs % 2) {
         $throughputs[[int][math]::Floor($Runs / 2)]
     }
@@ -136,6 +137,12 @@ try {
     else {
         ($workingSets[$Runs / 2 - 1] + $workingSets[$Runs / 2]) / 2
     }
+    $medianCpuTime = if ($Runs % 2) {
+        $cpuTimes[[int][math]::Floor($Runs / 2)]
+    }
+    else {
+        ($cpuTimes[$Runs / 2 - 1] + $cpuTimes[$Runs / 2]) / 2
+    }
     $commit = (git rev-parse HEAD).Trim()
     $artifact = [ordered]@{
         schema_version = 1
@@ -147,6 +154,7 @@ try {
         runs = @($results)
         summary = [ordered]@{
             median_transfer_mib_per_sec = [math]::Round($medianThroughput, 3)
+            median_cpu_seconds = [math]::Round($medianCpuTime, 3)
             median_max_sampled_working_set_bytes = [long]$medianWorkingSet
         }
     }
