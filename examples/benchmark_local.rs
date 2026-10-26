@@ -92,7 +92,8 @@ fn same_contents(left: &Path, right: &Path) -> Result<bool> {
     Ok(true)
 }
 
-async fn seed(source_file: &Path, ready_path: &Path, stop_path: &Path) -> Result<()> {
+async fn seed(source_file: &Path, ready_path: &Path, stop_path: &Path, size: u64) -> Result<()> {
+    create_payload(source_file, size)?;
     let source_dir = source_file.parent().context("source has no parent")?;
     let session = Session::new_with_opts(source_dir.to_path_buf(), isolated_options()).await?;
     let (torrent, _) = session
@@ -130,7 +131,6 @@ async fn measure(size_mib: u64) -> Result<()> {
     std::fs::create_dir(&destination)?;
     let source_file = source.join("payload.bin");
     let size = size_mib * 1024 * 1024;
-    create_payload(&source_file, size)?;
 
     let ready_path = workspace.path().join("seed-ready.json");
     let stop_path = workspace.path().join("seed-stop");
@@ -139,6 +139,7 @@ async fn measure(size_mib: u64) -> Result<()> {
         .arg(&source_file)
         .arg(&ready_path)
         .arg(&stop_path)
+        .arg(size.to_string())
         .stdout(Stdio::null())
         .spawn()?;
     let mut seeder = SeederChild(child);
@@ -207,11 +208,12 @@ async fn measure(size_mib: u64) -> Result<()> {
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--seed") {
-        anyhow::ensure!(args.len() == 5, "invalid seeder arguments");
+        anyhow::ensure!(args.len() == 6, "invalid seeder arguments");
         return seed(
             &PathBuf::from(&args[2]),
             &PathBuf::from(&args[3]),
             &PathBuf::from(&args[4]),
+            args[5].parse()?,
         )
         .await;
     }

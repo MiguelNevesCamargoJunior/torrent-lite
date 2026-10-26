@@ -19,7 +19,7 @@ jobs:
         run: rustup toolchain install 1.91.1 --profile minimal
       - name: Measure loopback transfer
         shell: pwsh
-        run: ./scripts/benchmark.ps1 -SizeMiB 32 -Runs 3 -OutputPath "benchmark-results/${{ runner.os }}.json"
+        run: ./scripts/benchmark.ps1 -SizeMiB 256 -Runs 3 -OutputPath "benchmark-results/${{ runner.os }}.json"
       - uses: actions/upload-artifact@v4
         with:
           name: benchmark-${{ runner.os }}

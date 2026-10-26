@@ -1,5 +1,5 @@
 param(
-    [ValidateRange(8, 256)] [int] $SizeMiB = 32,
+    [ValidateRange(8, 256)] [int] $SizeMiB = 256,
     [ValidateSet(1, 3, 5)] [int] $Runs = 3,
     [string] $OutputPath = 'benchmark-results/local.json'
 )

@@ -45,7 +45,7 @@ The library validates portable path components, rejects file/directory collision
 The [benchmark procedure](docs/benchmark-spec.md) builds a release example that downloads a deterministic payload from a separate loopback seeder process. It reports verified transfer time and throughput. A PowerShell script runs it three times and samples the downloader process's CPU and working set. The [manual benchmark workflow](https://github.com/MiguelNevesCamargoJunior/torrent-lite/actions/workflows/benchmark.yml) runs on Windows, Linux and macOS and uploads JSON results. No performance claim is made until those results are reviewed.
 
 ```powershell
-./scripts/benchmark.ps1 -SizeMiB 32 -Runs 3 -OutputPath benchmark-results/local.json
+./scripts/benchmark.ps1 -SizeMiB 256 -Runs 3 -OutputPath benchmark-results/local.json
 ```
 
 ## Experimental foreground download
