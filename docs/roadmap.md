@@ -19,6 +19,7 @@ This repository is experimental. A green CI run confirms the covered behaviors o
 - [x] Exercise interrupted v3→v4 migration before commit: retain the old database and backup, and refuse to overwrite the backup on reopen, subject to CI qualification.
 - [x] Register duplicate and distinct torrents from simultaneous authenticated HTTP clients, then verify the persisted count on reopen, subject to CI qualification.
 - [x] Kill test subprocesses before resolved metainfo and file selection commits; verify rollback on reopen, subject to CI qualification.
+- [x] Publish reproducible direct-loopback measurements of release throughput, process CPU and sampled working set on hosted Windows, Linux and macOS; full service benchmarks remain open.
 
 ## Required before a stable release
 

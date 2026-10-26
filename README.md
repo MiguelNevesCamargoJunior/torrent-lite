@@ -42,7 +42,9 @@ The library validates portable path components, rejects file/directory collision
 
 ## Local performance benchmark
 
-The [benchmark procedure](docs/benchmark-spec.md) builds a release example that downloads a deterministic payload from a separate loopback seeder process. It reports verified transfer time and throughput. A PowerShell script runs it three times and samples the downloader process's CPU and working set. The [manual benchmark workflow](https://github.com/MiguelNevesCamargoJunior/torrent-lite/actions/workflows/benchmark.yml) runs on Windows, Linux and macOS and uploads JSON results. No performance claim is made until those results are reviewed.
+The [benchmark procedure](docs/benchmark-spec.md) builds a release example that downloads a deterministic payload from a separate loopback seeder process. It reports verified transfer time and throughput. A PowerShell script runs it three times and samples the downloader process's CPU and working set. The [manual benchmark workflow](https://github.com/MiguelNevesCamargoJunior/torrent-lite/actions/workflows/benchmark.yml) runs on Windows, Linux and macOS and uploads JSON results. Results are scoped to this synthetic setup.
+
+The first reviewed [256 MiB loopback measurements](docs/benchmarks/2026-10-26-73c6ab9/README.md) include raw JSON for all three runners. They describe this synthetic setup only; public swarm and full service performance remain unmeasured.
 
 ```powershell
 ./scripts/benchmark.ps1 -SizeMiB 256 -Runs 3 -OutputPath benchmark-results/local.json

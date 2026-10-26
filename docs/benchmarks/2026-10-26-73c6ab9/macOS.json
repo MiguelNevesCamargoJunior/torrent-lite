@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "revision": "73c6ab910c4f1327a9d455bb9d203a4ae469bfc3",
+  "runner_os": "macOS",
+  "runner_image": "macos26",
+  "powershell_os": "macOS 26.6.2",
+  "size_mib": 256,
+  "runs": 3,
+  "transport": "tcp_loopback_direct",
+  "storage": "durable_sqlite_full_piece_recheck",
+  "sample_period_ms": 100,
+  "samples": [
+    {
+      "run": 1,
+      "payload_bytes": 268435456,
+      "transfer_seconds": 1.344391583,
+      "transfer_mib_per_sec": 190.4207101838126,
+      "process_cpu_seconds": 1.5719916,
+      "sampled_peak_working_set_bytes": 19693568
+    },
+    {
+      "run": 2,
+      "payload_bytes": 268435456,
+      "transfer_seconds": 1.423521708,
+      "transfer_mib_per_sec": 179.83568396696344,
+      "process_cpu_seconds": 1.488725,
+      "sampled_peak_working_set_bytes": 20398080
+    },
+    {
+      "run": 3,
+      "payload_bytes": 268435456,
+      "transfer_seconds": 1.477180583,
+      "transfer_mib_per_sec": 173.3031174022682,
+      "process_cpu_seconds": 1.7231583,
+      "sampled_peak_working_set_bytes": 18415616
+    }
+  ],
+  "median_transfer_mib_per_sec": 179.83568396696344,
+  "median_process_cpu_seconds": 1.5719916,
+  "max_sampled_working_set_bytes": 20398080
+}

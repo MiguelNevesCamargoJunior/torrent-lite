@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "revision": "73c6ab910c4f1327a9d455bb9d203a4ae469bfc3",
+  "runner_os": "Windows",
+  "runner_image": "win25-vs2026",
+  "powershell_os": "Microsoft Windows 10.0.26100",
+  "size_mib": 256,
+  "runs": 3,
+  "transport": "tcp_loopback_direct",
+  "storage": "durable_sqlite_full_piece_recheck",
+  "sample_period_ms": 100,
+  "samples": [
+    {
+      "run": 1,
+      "payload_bytes": 268435456,
+      "transfer_seconds": 6.3973857,
+      "transfer_mib_per_sec": 40.016346052106876,
+      "process_cpu_seconds": 2.9375,
+      "sampled_peak_working_set_bytes": 15527936
+    },
+    {
+      "run": 2,
+      "payload_bytes": 268435456,
+      "transfer_seconds": 5.7343561,
+      "transfer_mib_per_sec": 44.64319891120818,
+      "process_cpu_seconds": 3.09375,
+      "sampled_peak_working_set_bytes": 14815232
+    },
+    {
+      "run": 3,
+      "payload_bytes": 268435456,
+      "transfer_seconds": 5.6752905,
+      "transfer_mib_per_sec": 45.107823114957725,
+      "process_cpu_seconds": 3.078125,
+      "sampled_peak_working_set_bytes": 15020032
+    }
+  ],
+  "median_transfer_mib_per_sec": 44.64319891120818,
+  "median_process_cpu_seconds": 3.078125,
+  "max_sampled_working_set_bytes": 15527936
+}
