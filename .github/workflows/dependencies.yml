@@ -1,0 +1,39 @@
+name: Dependency policy
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 4 1 * *'
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - fuzz/Cargo.toml
+      - fuzz/Cargo.lock
+      - deny.toml
+      - .github/workflows/dependencies.yml
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - fuzz/Cargo.toml
+      - fuzz/Cargo.lock
+      - deny.toml
+      - .github/workflows/dependencies.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned cargo-deny
+        run: cargo install cargo-deny --version 0.20.2 --locked
+      - name: Check application dependencies
+        run: cargo deny check
+      - name: Check fuzz harness dependencies
+        run: cargo deny --manifest-path fuzz/Cargo.toml check
