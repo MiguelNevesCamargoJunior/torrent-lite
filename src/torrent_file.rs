@@ -40,7 +40,7 @@ pub fn inspect_torrent(bytes: &[u8]) -> Result<TorrentSummary, InputError> {
     if marker.info.meta_version.is_some() {
         return Err(InputError::UnsupportedFormat);
     }
-    if !marker.info.piece_length.is_some_and(|length| length > 0) {
+    if marker.info.piece_length.unwrap_or(0) == 0 {
         return Err(InputError::InvalidTorrent);
     }
     let meta = torrent_from_bytes(bytes).map_err(|_| InputError::InvalidTorrent)?;
