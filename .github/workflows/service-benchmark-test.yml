@@ -1,0 +1,55 @@
+name: Service benchmark qualification
+on:
+  push:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - examples/common/benchmark_support.rs
+      - src/bin/service_benchmark.rs
+      - tests/service_benchmark.rs
+      - src/service_core.rs
+      - src/local_api.rs
+      - src/service_discovery.rs
+      - src/api_client.rs
+      - src/policy_proxy.rs
+      - src/safe_storage.rs
+      - src/engine_storage.rs
+      - src/network_input.rs
+      - src/network_policy.rs
+      - .github/workflows/service-benchmark-test.yml
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - examples/common/benchmark_support.rs
+      - src/bin/service_benchmark.rs
+      - tests/service_benchmark.rs
+      - src/service_core.rs
+      - src/local_api.rs
+      - src/service_discovery.rs
+      - src/api_client.rs
+      - src/policy_proxy.rs
+      - src/safe_storage.rs
+      - src/engine_storage.rs
+      - src/network_input.rs
+      - src/network_policy.rs
+      - .github/workflows/service-benchmark-test.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qualification:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: rustup toolchain install 1.91.1 --profile minimal
+      - name: Run service benchmark qualification
+        run: cargo +1.91.1 test --locked --features service-benchmark --test service_benchmark

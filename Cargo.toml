@@ -19,6 +19,7 @@ local-api = ["service-core", "dep:axum", "tokio/signal"]
 api-client = ["local-api", "dep:reqwest"]
 mcp = ["api-client", "dep:rmcp"]
 browser-ui = ["api-client"]
+service-benchmark = ["api-client"]
 
 [dependencies]
 anyhow = { version = "1.0", optional = true }
@@ -93,9 +94,19 @@ required-features = ["mcp"]
 name = "browser_ui"
 required-features = ["browser-ui"]
 
+[[test]]
+name = "service_benchmark"
+required-features = ["service-benchmark"]
+
 [[example]]
 name = "benchmark_local"
 required-features = ["durable-engine"]
+
+[[bin]]
+name = "service_benchmark"
+path = "src/bin/service_benchmark.rs"
+required-features = ["service-benchmark"]
+doc = false
 
 [profile.release]
 lto = "thin"

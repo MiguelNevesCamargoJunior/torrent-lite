@@ -56,6 +56,8 @@ jobs:
         run: cargo +1.91.1 clippy --locked --all-targets --features local-api -- -D warnings
       - name: Local client lints
         run: cargo +1.91.1 clippy --locked --all-targets --features api-client -- -D warnings
+      - name: Service benchmark lints
+        run: cargo +1.91.1 clippy --locked --all-targets --features service-benchmark -- -D warnings
       - name: MCP lints
         run: cargo +1.91.1 clippy --locked --all-targets --features mcp -- -D warnings
       - name: Browser dashboard lints
