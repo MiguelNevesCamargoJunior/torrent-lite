@@ -11,9 +11,12 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --features service-core --test service_core
 cargo test --locked --features mcp --test mcp
 cargo test --locked --features browser-ui --test browser_ui
+cargo test --locked --test fuzz_regression
 ```
 
 Use small changes with one clear purpose. For behavior changes, add a test, observe its expected failure, implement the minimum, then refactor while green. Keep integration fixtures synthetic and local; tests must not contact public trackers or download third-party content. Record relevant commands and results in the pull request. Avoid tests that only inspect source text.
+
+For parser changes, run the deterministic mutation test above and see [fuzzing](docs/fuzzing.md) for the libFuzzer target and crash reproducer workflow.
 
 Do not commit credentials, downloaded content, runtime state or build output. Keep Cargo.lock versioned. Discuss dependency additions and security boundaries. Keep new network and file operations behind tests for their security boundaries. Document unsupported protocols and failed tests explicitly.
 

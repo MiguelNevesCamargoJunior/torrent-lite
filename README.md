@@ -40,6 +40,8 @@ cargo run --locked -- inspect-torrent path/to/file.torrent --json
 
 The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The feature-gated service passed synthetic pause, restart, tracker download, selected-file transfer and bounded seeding tests on Windows, Linux and macOS. Forced process stops and transaction crash tests cover several state changes, including v3 migration; service mutation crashes and other migration phases remain open. Simulated partial `StorageFull` writes and exclusive Windows file locks have recovery tests; real disk quotas and locks during active writes remain open. See the [crash consistency contract](docs/crash-consistency-spec.md), [disk-full test scope](docs/disk-full-spec.md) and [Windows lock test scope](docs/windows-file-lock-spec.md).
 
+Untrusted `.torrent` and magnet parsing now has a [deterministic mutation regression test and a libFuzzer target](docs/fuzzing.md). A scheduled Linux workflow runs a short fuzz campaign; independent security review and broader protocol fuzzing remain open.
+
 ## Local performance benchmark
 
 The [benchmark procedure](docs/benchmark-spec.md) builds a release example that downloads a deterministic payload from a separate loopback seeder process. It reports verified transfer time and throughput. A PowerShell script runs it three times and samples the downloader process's CPU and working set. The [manual benchmark workflow](https://github.com/MiguelNevesCamargoJunior/torrent-lite/actions/workflows/benchmark.yml) runs on Windows, Linux and macOS and uploads JSON results. Results are scoped to this synthetic setup.
