@@ -38,8 +38,15 @@ Inspect a local v1 metainfo file without starting a download:
 cargo run --locked -- inspect-torrent path/to/file.torrent --json
 ```
 
-The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The feature-gated service passed synthetic pause, restart, tracker download, selected-file transfer and bounded seeding tests on Windows, Linux and macOS. A forced process stop test covers paused addition and removal; crash injection at every mutation, low-disk behavior and public swarm performance qualification are pending.
-Subprocess tests now also stop the state-store test binary immediately before four SQLite commits and verify rollback after reopening on all three systems. This covers registration, running intent, removal and file identity; see the [crash consistency contract](docs/crash-consistency-spec.md). Service and migration crash points remain open.
+The library validates portable path components, rejects file/directory collisions and opens files relative to an opened root directory. Existing files require a recorded file identity before reopening. The feature-gated service passed synthetic pause, restart, tracker download, selected-file transfer and bounded seeding tests on Windows, Linux and macOS. Forced process stops and transaction crash tests cover several state changes, including v3 migration; service mutation crashes and other migration phases remain open. Simulated partial `StorageFull` writes and exclusive Windows file locks have recovery tests; real disk quotas and locks during active writes remain open. See the [crash consistency contract](docs/crash-consistency-spec.md), [disk-full test scope](docs/disk-full-spec.md) and [Windows lock test scope](docs/windows-file-lock-spec.md).
+
+## Local performance benchmark
+
+The [benchmark procedure](docs/benchmark-spec.md) builds a release example that downloads a deterministic payload from a separate loopback seeder process. It reports verified transfer time and throughput. A PowerShell script runs it three times and samples the downloader process's CPU and working set. The [manual benchmark workflow](https://github.com/MiguelNevesCamargoJunior/torrent-lite/actions/workflows/benchmark.yml) runs on Windows, Linux and macOS and uploads JSON results. No performance claim is made until those results are reviewed.
+
+```powershell
+./scripts/benchmark.ps1 -SizeMiB 32 -Runs 3 -OutputPath benchmark-results/local.json
+```
 
 ## Experimental foreground download
 

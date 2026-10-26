@@ -1,0 +1,27 @@
+name: Local benchmark
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: rustup toolchain install 1.91.1 --profile minimal
+      - name: Measure loopback transfer
+        shell: pwsh
+        run: ./scripts/benchmark.ps1 -SizeMiB 32 -Runs 3 -OutputPath "benchmark-results/${{ runner.os }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ runner.os }}
+          path: benchmark-results/${{ runner.os }}.json
+          retention-days: 30

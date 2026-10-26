@@ -93,6 +93,10 @@ required-features = ["mcp"]
 name = "browser_ui"
 required-features = ["browser-ui"]
 
+[[example]]
+name = "benchmark_local"
+required-features = ["durable-engine"]
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
