@@ -65,13 +65,28 @@ try {
                 Start-Sleep -Milliseconds 100
             }
             $process.WaitForExit()
+            $process.Refresh()
             $clock.Stop()
+            $cpuSeconds = [math]::Round($process.TotalProcessorTime.TotalSeconds, 3)
             $stdout = $process.StandardOutput.ReadToEnd()
             $stderr = $process.StandardError.ReadToEnd()
             [System.IO.File]::WriteAllText($stdoutPath, $stdout, [System.Text.Encoding]::UTF8)
             [System.IO.File]::WriteAllText($stderrPath, $stderr, [System.Text.Encoding]::UTF8)
             if ($process.ExitCode -ne 0) {
                 throw "Service benchmark run $run failed with exit code $($process.ExitCode): $stderr"
+            }
+            if ($samples.Count -eq 0) {
+                throw "Service benchmark run $run produced no process samples."
+            }
+            $maxWorkingSet = 0L
+            foreach ($sample in $samples) {
+                $sampleWorkingSet = [long]$sample["working_set_bytes"]
+                if ($sampleWorkingSet -gt $maxWorkingSet) {
+                    $maxWorkingSet = $sampleWorkingSet
+                }
+            }
+            if ($cpuSeconds -le 0 -or $maxWorkingSet -le 0) {
+                throw "Service benchmark run $run did not produce valid CPU and working-set measurements."
             }
 
             $report = $stdout | ConvertFrom-Json -AsHashtable
@@ -80,15 +95,15 @@ try {
                 -not $report.download_verified -or
                 $report.tracker_announces -lt 1 -or
                 $report.proxy_tracker_connections -lt 1 -or
-                $report.proxy_peer_connections -lt 1) {
+                $report.proxy_peer_connections -lt 1 -or
+                $report.transfer_mib_per_sec -le 0) {
                 throw "Service benchmark run $run returned an invalid or unverified report."
             }
-            $maxWorkingSet = ($samples | Measure-Object -Property working_set_bytes -Maximum).Maximum
             $results.Add([ordered]@{
                 run = $run
                 elapsed_seconds = [math]::Round($clock.Elapsed.TotalSeconds, 3)
-                cpu_seconds = [math]::Round($process.TotalProcessorTime.TotalSeconds, 3)
-                max_sampled_working_set_bytes = [long]$maxWorkingSet
+                cpu_seconds = $cpuSeconds
+                max_sampled_working_set_bytes = $maxWorkingSet
                 samples = @($samples)
                 service_report = $report
             })
